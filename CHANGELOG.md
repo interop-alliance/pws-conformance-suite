@@ -1,5 +1,11 @@
 # @interop/was-conformance-suite Changelog
 
+## 0.30.1 - TBD
+
+### Changed
+
+- Update to latest was-client and vh log deps.
+
 ## 0.30.0 - 2026-10-05
 
 ### Changed
