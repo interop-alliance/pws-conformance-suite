@@ -1,5 +1,11 @@
 # @interop/was-conformance-suite Changelog
 
+## 0.31.1 - TBD
+
+### Changed
+
+- Use latest was-client, di core and jsigs.
+
 ## 0.31.0 - 2026-10-11
 
 ### Changed
