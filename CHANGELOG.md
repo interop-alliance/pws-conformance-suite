@@ -1,5 +1,17 @@
 # @interop/was-conformance-suite Changelog
 
+## 0.31.0 - TBD
+
+### Changed
+
+- Follow was-client 0.97: `WasClient` takes the server's Spaces Repository URL
+  (`<server-url>/spaces/`) as its `serverUrl`. The CLI's `<server-url>`
+  positional and `TEST_SERVER_URL` remain the server's base URL; the suite
+  derives the Spaces URL where it builds a client.
+- Service description discovery probes the Spaces Repository URL rather than the
+  server root. The spec starts discovery from any PWS URL, and a server's root
+  need not be one.
+
 ## 0.30.1 - 2026-10-11
 
 ### Changed

@@ -33,6 +33,7 @@ import {
 import type { Suite } from '../harness/types.js'
 
 import { ConflictError, WasClient } from '@interop/was-client'
+import { spacesUrl } from '@interop/was-client/paths'
 import type { Collection, FindPage, Space } from '@interop/was-client'
 import {
   createEdvEncryption,
@@ -134,7 +135,7 @@ async function encryptedClient({ serverUrl }: { serverUrl: string }): Promise<{
   })
   return {
     was: WasClient.fromSigner({
-      serverUrl,
+      serverUrl: spacesUrl({ baseUrl: serverUrl }),
       signer: keyPair.didKeySigner(),
       encryption
     }),

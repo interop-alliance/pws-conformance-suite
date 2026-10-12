@@ -9,6 +9,8 @@
  * serves the document elsewhere is read correctly.
  */
 
+import { spacesUrl } from '@interop/was-client/paths'
+
 /** The WAS core specification's self-declared persistent identifier. */
 export const PWS_SPEC_IDENTIFIER = 'https://w3id.org/pws'
 
@@ -42,18 +44,22 @@ function serviceLinkOf(response: Response, base: string): string | undefined {
 
 /**
  * Fetches a server's service description by following the `service` link off
- * its root, returning the parsed document. A server that links no document, or
- * does not serve one, yields `undefined` rather than throwing -- the caller
- * decides what an absent document means for its gate.
+ * its Spaces Repository URL, returning the parsed document. The spec's
+ * discovery starts from any PWS URL; the server's root need not be one (a
+ * wallet may serve its own app there), so the probe uses `/spaces/`. A server
+ * that links no document, or does not serve one, yields `undefined` rather
+ * than throwing -- the caller decides what an absent document means for its
+ * gate.
  *
- * @param serverUrl {string}
+ * @param serverUrl {string}   the server's base URL
  * @returns {Promise<any | undefined>}
  */
 export async function fetchServiceDescription(
   serverUrl: string
 ): Promise<any | undefined> {
-  const rootResponse = await fetch(serverUrl)
-  const serviceUrl = serviceLinkOf(rootResponse, serverUrl)
+  const probeUrl = spacesUrl({ baseUrl: serverUrl })
+  const probeResponse = await fetch(probeUrl)
+  const serviceUrl = serviceLinkOf(probeResponse, probeUrl)
   if (serviceUrl === undefined) {
     return undefined
   }

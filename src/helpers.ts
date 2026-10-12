@@ -3,6 +3,7 @@
  */
 import { ZcapClient } from '@interop/ezcap'
 import { WasClient } from '@interop/was-client'
+import { spacesUrl } from '@interop/was-client/paths'
 import type { Space } from '@interop/was-client'
 import { decodeSecretKeySeed } from '@digitalcredentials/bnid'
 import { EddsaJcs2022 } from '@interop/ed25519-signature/eddsa-jcs-2022'
@@ -47,7 +48,8 @@ export function zcapClient({ signer }: { signer: ISigner }): ZcapClient {
 
 /**
  * Builds a high-level WAS client wrapping a ZcapClient for the given signer.
- * The `serverUrl` is the base for both URL building and zcap invocationTargets.
+ * The `serverUrl` is the server's base URL, the parent of its Spaces
+ * Repository; the client itself takes the `/spaces/` URL as its `serverUrl`.
  *
  * @param options {object}
  * @param options.serverUrl {string}
@@ -61,7 +63,10 @@ export function wasClient({
   serverUrl: string
   signer: ISigner
 }): WasClient {
-  return new WasClient({ serverUrl, zcapClient: zcapClient({ signer }) })
+  return new WasClient({
+    serverUrl: spacesUrl({ baseUrl: serverUrl }),
+    zcapClient: zcapClient({ signer })
+  })
 }
 
 export async function buildZcapClients({
@@ -150,7 +155,10 @@ export async function createSpace({
     const data = await response.json()
     return { status: response.status, headers: response.headers, data }
   }
-  const was = new WasClient({ serverUrl, zcapClient: rootClient })
+  const was = new WasClient({
+    serverUrl: spacesUrl({ baseUrl: serverUrl }),
+    zcapClient: rootClient
+  })
   const response = await was.request({
     path: '/spaces/',
     method: 'POST',

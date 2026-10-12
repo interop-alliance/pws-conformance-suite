@@ -53,11 +53,11 @@
     "uuid": "^14.0.0"
   },
   "peerDependencies": {
-    "@interop/was-client": ">=0.70.0 <1.0.0"
+    "@interop/was-client": ">=0.97.0 <1.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@interop/was-client": "^0.96.0",
+    "@interop/was-client": "^0.97.0",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",
     "@vitest/coverage-v8": "^4.1.7",
