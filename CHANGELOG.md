@@ -1,5 +1,16 @@
 # @interop/was-conformance-suite Changelog
 
+## 0.32.0 - TBD
+
+### Changed
+
+- The backends and quota cases no longer pin a single server-managed backend
+  entry. A server may list its default backend under `default` alone or also
+  under a fixed id of its own (and run several server backends), and a quota
+  report names a backend by any id from the Space's backends listing. The cases
+  check the `default` entry and the shape of each server-managed entry instead
+  of the count.
+
 ## 0.31.1 - 2026-10-12
 
 ### Changed

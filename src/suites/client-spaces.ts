@@ -317,7 +317,15 @@ export const clientSpaces: Suite<State> = {
         await collection.add({ hello: 'world' })
         const usage = await collection.quota()
         assert.ok(usage)
-        assert.equal(usage.id, 'default')
+        // The report names the backend by an id from the Space's backends
+        // listing. A server may list its default backend under `default`
+        // alone or also under a fixed id of its own, and report either.
+        const backends = await space.backends()
+        assert.ok(backends)
+        assert.ok(
+          backends.some(backend => backend.id === usage.id),
+          `backend ${usage.id} is not in the Space's backends listing`
+        )
         assert.equal(usage.managedBy, 'server')
         assert.equal(usage.state, 'ok')
         assert.ok(usage.usageBytes > 0, 'expected non-zero collection usage')
@@ -351,16 +359,22 @@ export const clientSpaces: Suite<State> = {
         const { space } = state
         const backends = await space.backends()
         assert.ok(backends)
-        assert.equal(backends.length, 1)
-        // The display name is server-specific (e.g. 'Server Filesystem' or
-        // 'Server PostgreSQL'); the suite runs against any conforming server.
-        const { name, ...rest } = backends[0]!
-        assert.ok(typeof name === 'string' && name.length > 0)
-        assert.deepStrictEqual(rest, {
-          id: 'default',
-          managedBy: 'server',
-          persistence: 'durable'
-        })
+        // A fresh Space lists only the server's own backends: the `default`
+        // entry and, on a server that runs several, each under a fixed id.
+        // How many there are and their display names (e.g. 'Server
+        // Filesystem' or 'Server PostgreSQL') are server-specific; the suite
+        // runs against any conforming server.
+        assert.ok(backends.length >= 1)
+        assert.ok(backends.some(backend => backend.id === 'default'))
+        for (const backend of backends) {
+          const { id, name, ...rest } = backend
+          assert.ok(typeof id === 'string' && id.length > 0)
+          assert.ok(typeof name === 'string' && name.length > 0)
+          assert.deepStrictEqual(rest, {
+            managedBy: 'server',
+            persistence: 'durable'
+          })
+        }
       }
     },
     {
@@ -385,10 +399,19 @@ export const clientSpaces: Suite<State> = {
         const report = await space.quotas()
         assert.ok(report)
         assert.match(report.respondedAt, /^\d{4}-\d{2}-\d{2}T/)
+        // One entry per server backend holding this Space's data. The Space
+        // has written to its default backend only, and the entry names it by
+        // an id from the backends listing (`default`, or a server's own fixed
+        // id for it).
         assert.equal(report.backends.length, 1)
         const entry = report.backends[0]
         assert.ok(entry)
-        assert.equal(entry.id, 'default')
+        const backends = await space.backends()
+        assert.ok(backends)
+        assert.ok(
+          backends.some(backend => backend.id === entry.id),
+          `backend ${entry.id} is not in the Space's backends listing`
+        )
         // Server-specific display name; just require one.
         assert.ok(typeof entry.name === 'string' && entry.name.length > 0)
         assert.equal(entry.managedBy, 'server')

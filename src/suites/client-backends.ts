@@ -119,12 +119,16 @@ export const clientBackends: Suite<State> = {
         await space.registerBackend(gdriveRegistration('gdrive-personal'))
         const backends = await space.backends()
         assert.ok(backends)
-        assert.equal(backends.length, 2)
+        // A server lists its own backends ahead of the registered ones: the
+        // `default` entry, then any under their own ids. How many it runs is
+        // server-specific.
         assert.ok(backends.some(backend => backend.id === 'default'))
-        const gdrive = backends.find(
-          backend => backend.id === 'gdrive-personal'
+        const external = backends.filter(
+          backend => backend.managedBy === 'external'
         )
-        assert.ok(gdrive)
+        assert.equal(external.length, 1)
+        const gdrive = external[0]!
+        assert.equal(gdrive.id, 'gdrive-personal')
         assert.equal(gdrive.provider, 'google-drive')
         assert.equal(gdrive.connection?.status, 'registered')
         // No secret leaks on the list path either.
