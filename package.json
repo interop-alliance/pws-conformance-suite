@@ -1,7 +1,7 @@
 {
   "name": "@interop/was-conformance-suite",
   "description": "Conformance test suite for Wallet Attached Storage (WAS) servers, runnable as a CLI or in the browser.",
-  "version": "0.31.1",
+  "version": "0.32.0",
   "type": "module",
   "scripts": {
     "build": "pnpm run clear && tsc",
