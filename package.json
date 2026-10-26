@@ -1,6 +1,6 @@
 {
   "name": "@interop/was-conformance-suite",
-  "description": "Conformance test suite for Wallet Attached Storage (WAS) servers, runnable as a CLI or in the browser.",
+  "description": "Conformance test suite for Portable Web Spaces (PWS) servers, runnable as a CLI or in the browser.",
   "version": "0.32.0",
   "type": "module",
   "scripts": {
@@ -76,8 +76,8 @@
     "provenance": "true"
   },
   "keywords": [
-    "wallet-attached-storage",
-    "was",
+    "portable-web-spaces",
+    "pws",
     "conformance",
     "test-suite",
     "isomorphic"
@@ -93,8 +93,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/interop-alliance/was-conformance-suite.git"
+    "url": "git+https://github.com/interop-alliance/pws-conformance-suite.git"
   },
-  "homepage": "https://github.com/interop-alliance/was-conformance-suite",
-  "bugs": "https://github.com/interop-alliance/was-conformance-suite/issues"
+  "homepage": "https://github.com/interop-alliance/pws-conformance-suite",
+  "bugs": "https://github.com/interop-alliance/pws-conformance-suite/issues"
 }

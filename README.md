@@ -1,10 +1,10 @@
-# WAS Conformance Suite _(@interop/was-conformance-suite)_
+# PWS Conformance Suite _(@interop/was-conformance-suite)_
 
 [![Node.js CI](https://github.com/interop-alliance/was-conformance-suite/workflows/CI/badge.svg)](https://github.com/interop-alliance/was-conformance-suite/actions?query=workflow%3A%22CI%22)
 [![NPM Version](https://img.shields.io/npm/v/@interop/was-conformance-suite.svg)](https://npm.im/@interop/was-conformance-suite)
 
 > Conformance test suite for
-> [Wallet Attached Storage (WAS)](https://w3c-ccg.github.io/wallet-attached-storage-spec/)
+> [Portable Web Spaces (PWS)](https://w3c-ccg.github.io/portable-web-spaces-spec/)
 > servers, runnable as a CLI, in the browser, or as a library.
 
 ## Table of Contents
@@ -24,13 +24,13 @@
 
 ## Background
 
-This suite black-box tests any running Wallet Attached Storage server
+This suite black-box tests any running Portable Web Spaces server
 implementation over HTTP: spaces, collections, resources, access-control
 policies, change queries, encryption descriptors, ZCap delegation, and space
 export/import. It never inspects server internals -- point it at a server URL
 (plus an optional onboarding token, if the server gates provisioning) and it
 reports per-test pass/fail results against the
-[WAS spec](https://w3c-ccg.github.io/wallet-attached-storage-spec/).
+[PWS spec](https://w3c-ccg.github.io/portable-web-spaces-spec/).
 
 ### The server URL must be byte-identical everywhere
 
@@ -74,7 +74,7 @@ pnpm install
 ## Usage
 
 The suite runs the same test registry three ways: from the command line, from a
-hosted web app, or as a library. In every case you provide a WAS server URL and,
+hosted web app, or as a library. In every case you provide a PWS server URL and,
 if the server gates provisioning, an [onboarding token](#onboarding-token).
 
 Remember the
@@ -102,7 +102,7 @@ Options:
 ```
 Usage: was-conformance <server-url> [options]
 
-Runs the WAS conformance suite against a running server.
+Runs the PWS conformance suite against a running server.
 <server-url> falls back to the TEST_SERVER_URL environment variable.
 
 Options:
@@ -234,7 +234,7 @@ console.log(report.counts) // { total, pass, fail, skip, optionalFail }
 
 ### Onboarding token
 
-Some WAS servers gate space provisioning behind a shared-secret onboarding
+Some PWS servers gate space provisioning behind a shared-secret onboarding
 token. When configured, the suite sends it as an `Authorization: Bearer` header
 on provisioning requests. If a server does not gate provisioning, space creation
 is open and no token is needed -- omit `--token` / `TEST_ONBOARDING_TOKEN` and

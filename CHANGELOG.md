@@ -1,5 +1,11 @@
 # @interop/was-conformance-suite Changelog
 
+## 0.32.1 - TBD
+
+### Changed
+
+- **BREAKING**: Rename `was` to `pws` in package.json, README.md, and CHANGELOG.md.
+
 ## 0.32.0 - 2026-10-23
 
 ### Changed
