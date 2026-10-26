@@ -50,9 +50,9 @@ type ParseResult =
   | { kind: 'version' }
   | { kind: 'usage'; message: string }
 
-const HELP = `Usage: was-conformance <server-url> [options]
+const HELP = `Usage: pws-conformance <server-url> [options]
 
-Runs the WAS conformance suite against a running server.
+Runs the PWS conformance suite against a running server.
 <server-url> falls back to the TEST_SERVER_URL environment variable.
 
 Options:
@@ -320,7 +320,7 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
           write: deps.stdout,
           writeErr: deps.stderr,
           tool: {
-            name: 'was-conformance',
+            name: 'pws-conformance',
             version: deps.version,
             ...(deps.clientVersion !== undefined && {
               clientVersion: deps.clientVersion

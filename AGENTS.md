@@ -1,6 +1,6 @@
 # Agent Guidelines
 
-This repo is `@interop/was-conformance-suite`, a black-box conformance test
+This repo is `@interop/pws-conformance-suite`, a black-box conformance test
 suite for Portable Web Spaces (PWS, formerly Wallet Attached Storage / WAS) servers, runnable as a CLI, a hosted web
 app, or a library.
 

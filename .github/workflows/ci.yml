@@ -44,24 +44,24 @@ jobs:
         run: pnpm run test:browser
 
       # Verify the published tarball ships dist (and only dist), that the
-      # `was-conformance` bin survives packing, and that it runs from a
+      # `pws-conformance` bin survives packing, and that it runs from a
       # clean install of the tarball.
       - name: Pack smoke test
         run: |
           set -euo pipefail
-          pnpm pack --out was-conformance-suite.tgz
-          tar -tzf was-conformance-suite.tgz > pack-contents.txt
+          pnpm pack --out pws-conformance-suite.tgz
+          tar -tzf pws-conformance-suite.tgz > pack-contents.txt
           grep -q '^package/dist/cli/index.js$' pack-contents.txt
           if grep -qE '^package/(web|src|test)/' pack-contents.txt; then
             echo 'Tarball contains files outside dist:' && cat pack-contents.txt
             exit 1
           fi
           install_dir="$(mktemp -d)"
-          tarball="$PWD/was-conformance-suite.tgz"
+          tarball="$PWD/pws-conformance-suite.tgz"
           cd "$install_dir"
           npm init -y > /dev/null
           npm install "$tarball" > /dev/null
-          ./node_modules/.bin/was-conformance --version
+          ./node_modules/.bin/pws-conformance --version
 
   # End-to-end guarantee that the extracted suite still tests a real server:
   # check out was-teaching-server, boot it, and run the built CLI against it

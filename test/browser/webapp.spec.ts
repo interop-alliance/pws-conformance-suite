@@ -60,7 +60,7 @@ test('an unreachable server shows the network/CORS diagnosis', async ({
   await expect(page.getByTestId('preflight-error')).toContainText(/CORS/i)
   // The diagnosis points at the CORS-free alternative.
   await expect(page.getByTestId('preflight-error')).toContainText(
-    /was-conformance/
+    /pws-conformance/
   )
   // No suites ran.
   await expect(page.getByTestId('test-row')).toHaveCount(0)

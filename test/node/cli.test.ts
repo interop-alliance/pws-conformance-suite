@@ -185,7 +185,7 @@ describe('cli main -- help/version/usage', () => {
     const { deps, out } = makeDeps()
     const code = await main(['--help'], deps)
     expect(code).toBe(0)
-    expect(out.join('')).toContain('Usage: was-conformance')
+    expect(out.join('')).toContain('Usage: pws-conformance')
   })
 
   it('prints the version and exits 0', async () => {
@@ -414,7 +414,7 @@ describe('json reporter', () => {
       write: t => out.push(t),
       writeErr: () => {},
       tool: {
-        name: 'was-conformance',
+        name: 'pws-conformance',
         version: '9.9.9',
         clientVersion: '1.2.3'
       },
@@ -439,7 +439,7 @@ describe('json reporter', () => {
     expect(out).toHaveLength(1)
     const doc = JSON.parse(out[0]!)
     expect(doc.tool).toEqual({
-      name: 'was-conformance',
+      name: 'pws-conformance',
       version: '9.9.9',
       clientVersion: '1.2.3'
     })

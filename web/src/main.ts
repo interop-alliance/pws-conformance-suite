@@ -16,7 +16,7 @@ import { el, runningRow, testRow } from './view.js'
 import type { RunEvent, RunReport } from '../../src/index.js'
 import './app.css'
 
-const TOKEN_KEY = 'was-conformance:token'
+const TOKEN_KEY = 'pws-conformance:token'
 type OptionalMode = 'warn' | 'include' | 'skip'
 
 /** Convenience typed lookup by the app's `data-testid` contract. */
@@ -329,7 +329,7 @@ async function startRun({
     showPreflightError(
       `Server unreachable from a browser: a network error or missing CORS ` +
         `support. If the server is running, it may not send CORS headers; the ` +
-        `CLI has no CORS constraint: npx @interop/was-conformance-suite ` +
+        `CLI has no CORS constraint: npx @interop/pws-conformance-suite ` +
         redactUrl(serverUrl)
     )
     setRunning(false)
@@ -555,7 +555,7 @@ function onDownloadJson(): void {
   const url = URL.createObjectURL(blob)
   const anchor = el('a', {
     href: url,
-    download: 'was-conformance-report.json'
+    download: 'pws-conformance-report.json'
   }) as HTMLAnchorElement
   document.body.append(anchor)
   anchor.click()

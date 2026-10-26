@@ -1,7 +1,7 @@
-# PWS Conformance Suite _(@interop/was-conformance-suite)_
+# PWS Conformance Suite _(@interop/pws-conformance-suite)_
 
-[![Node.js CI](https://github.com/interop-alliance/was-conformance-suite/workflows/CI/badge.svg)](https://github.com/interop-alliance/was-conformance-suite/actions?query=workflow%3A%22CI%22)
-[![NPM Version](https://img.shields.io/npm/v/@interop/was-conformance-suite.svg)](https://npm.im/@interop/was-conformance-suite)
+[![Node.js CI](https://github.com/interop-alliance/pws-conformance-suite/workflows/CI/badge.svg)](https://github.com/interop-alliance/pws-conformance-suite/actions?query=workflow%3A%22CI%22)
+[![NPM Version](https://img.shields.io/npm/v/@interop/pws-conformance-suite.svg)](https://npm.im/@interop/pws-conformance-suite)
 
 > Conformance test suite for
 > [Portable Web Spaces (PWS)](https://w3c-ccg.github.io/portable-web-spaces-spec/)
@@ -58,7 +58,7 @@ headers to the server under test.
 To install via PNPM:
 
 ```
-pnpm install @interop/was-conformance-suite
+pnpm install @interop/pws-conformance-suite
 ```
 
 ### Development
@@ -66,8 +66,8 @@ pnpm install @interop/was-conformance-suite
 To install locally (for development):
 
 ```
-git clone https://github.com/interop-alliance/was-conformance-suite.git
-cd was-conformance-suite
+git clone https://github.com/interop-alliance/pws-conformance-suite.git
+cd pws-conformance-suite
 pnpm install
 ```
 
@@ -84,23 +84,23 @@ serve on.
 
 ### CLI
 
-The package ships a single `was-conformance` bin, so you can run it directly
+The package ships a single `pws-conformance` bin, so you can run it directly
 with `npx` (no install step needed):
 
 ```
-npx @interop/was-conformance-suite http://localhost:3002
+npx @interop/pws-conformance-suite http://localhost:3002
 ```
 
 Or, once installed:
 
 ```
-was-conformance http://localhost:3002
+pws-conformance http://localhost:3002
 ```
 
 Options:
 
 ```
-Usage: was-conformance <server-url> [options]
+Usage: pws-conformance <server-url> [options]
 
 Runs the PWS conformance suite against a running server.
 <server-url> falls back to the TEST_SERVER_URL environment variable.
@@ -159,7 +159,7 @@ Two settings can be supplied via the environment instead of on the command line:
 - `TEST_ONBOARDING_TOKEN` -- used when `--token` is omitted.
 
 ```
-TEST_SERVER_URL=http://localhost:3002 TEST_ONBOARDING_TOKEN=secret was-conformance
+TEST_SERVER_URL=http://localhost:3002 TEST_ONBOARDING_TOKEN=secret pws-conformance
 ```
 
 #### Exit codes
@@ -176,7 +176,7 @@ promotes them (see [below](#optional-vs-required-tests)).
 For machine-readable output, use the JSON reporter:
 
 ```
-was-conformance http://localhost:3002 --reporter json
+pws-conformance http://localhost:3002 --reporter json
 ```
 
 It writes a structured report to stdout while preserving the same exit-code
@@ -185,7 +185,7 @@ semantics, so a CI job can both assert on the exit code and archive the report.
 ### Web app
 
 A hosted runner is available at
-<https://interop-alliance.github.io/was-conformance-suite/>. Paste in a server
+<https://interop-alliance.github.io/pws-conformance-suite/>. Paste in a server
 URL and an optional onboarding token, and the suite runs **fully client-side in
 your browser** -- the token is used only to talk to the server under test and
 never leaves the browser.
@@ -197,7 +197,7 @@ CORS)", use the [CLI](#cli) instead, which is not subject to browser CORS
 restrictions.
 
 You can prefill the server URL field with the `?server=` query parameter, e.g.
-`.../was-conformance-suite/?server=http://localhost:3002`.
+`.../pws-conformance-suite/?server=http://localhost:3002`.
 
 To run the web app locally during development:
 
@@ -211,7 +211,7 @@ Import `runConformance` (and, if you want to select a subset, `suites`) and read
 the returned `RunReport`:
 
 ```ts
-import { runConformance, suites } from '@interop/was-conformance-suite'
+import { runConformance, suites } from '@interop/pws-conformance-suite'
 
 const report = await runConformance({
   serverUrl: 'http://localhost:3002',

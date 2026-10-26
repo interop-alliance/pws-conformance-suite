@@ -3,7 +3,7 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The `was-conformance` bin entry: reads the tool and client versions from the
+ * The `pws-conformance` bin entry: reads the tool and client versions from the
  * installed packages, binds real process I/O, and delegates to the testable
  * `main()`. All logic lives in `./main.js`.
  */

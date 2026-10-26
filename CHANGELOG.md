@@ -1,6 +1,6 @@
-# @interop/was-conformance-suite Changelog
+# @interop/pws-conformance-suite Changelog
 
-## 0.32.1 - 2026-10-25
+## 0.33.0 - 2026-10-25
 
 ### Changed
 

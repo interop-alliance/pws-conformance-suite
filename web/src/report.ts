@@ -76,7 +76,7 @@ export function buildReportJson({
   report: RunReport
 }): string {
   const document = {
-    tool: { name: 'was-conformance', version },
+    tool: { name: 'pws-conformance', version },
     serverUrl,
     startedAt: report.startedAt,
     durationMs: report.durationMs,
