@@ -485,7 +485,7 @@ export const chunksApi: Suite<State> = {
     },
     {
       id: 'chunks.list-reflects-stored-and-empty',
-      name: '[root] the chunk listing reports stored chunks in index order, and count 0 once emptied',
+      name: '[root] the chunk listing reports stored chunks in index order with their ETags, and count 0 once emptied',
       specRefs: [
         'https://w3id.org/pws/encrypted-collections#list-chunks-operation'
       ],
@@ -524,6 +524,7 @@ export const chunksApi: Suite<State> = {
           new Uint8Array([2, 2]),
           new Uint8Array([3, 3, 3])
         ]
+        const putEtags: Record<number, string> = {}
         for (const index of [2, 0, 1]) {
           const response = await alice.rootClient.request({
             url: chunkUrl({ collectionId: 'data', resourceId, index }),
@@ -532,6 +533,7 @@ export const chunksApi: Suite<State> = {
             body: chunkBytes[index]
           })
           assert.equal(response.status, 204)
+          putEtags[index] = response.headers.get('etag') ?? ''
         }
 
         const listing = await alice.rootClient.request({
@@ -550,15 +552,57 @@ export const chunksApi: Suite<State> = {
         )
         for (const chunk of listing.data.chunks) {
           assert.equal(chunk.contentType, 'application/octet-stream')
+          // Each entry carries the chunk's own ETag: the one its write
+          // returned and its GET and HEAD serve, so a client can pin a
+          // DELETE of a listed chunk with If-Match without a read per chunk.
+          assert.equal(typeof chunk.etag, 'string')
+          assert.equal(chunk.etag, putEtags[chunk.index])
+          const url = chunkUrl({
+            collectionId: 'data',
+            resourceId,
+            index: chunk.index
+          })
+          const getResponse = await alice.rootClient.request({
+            url,
+            method: 'GET'
+          })
+          assert.equal(getResponse.headers.get('etag'), chunk.etag)
+          const headResponse = await alice.rootClient.request({
+            url,
+            method: 'HEAD'
+          })
+          assert.equal(headResponse.headers.get('etag'), chunk.etag)
         }
 
-        // Deleting every chunk returns the listing to count 0 (the parent
-        // Resource still exists, so the container still lists).
-        for (const index of [0, 1, 2]) {
+        // A listed ETag pins a delete: one pinned on another entry's ETag is
+        // refused with 412, and one pinned on the entry's own succeeds.
+        let staleError: any
+        try {
           await alice.rootClient.request({
-            url: chunkUrl({ collectionId: 'data', resourceId, index }),
-            method: 'DELETE'
+            url: chunkUrl({ collectionId: 'data', resourceId, index: 0 }),
+            method: 'DELETE',
+            headers: { 'if-match': listing.data.chunks[1].etag }
           })
+        } catch (err) {
+          staleError = err
+        }
+        assert.ok(staleError, 'expected the stale pinned delete to fail')
+        assert.equal(staleError.response.status, 412)
+
+        // Deleting every chunk, each pinned on its listed ETag, returns the
+        // listing to count 0 (the parent Resource still exists, so the
+        // container still lists).
+        for (const chunk of listing.data.chunks) {
+          const deleted = await alice.rootClient.request({
+            url: chunkUrl({
+              collectionId: 'data',
+              resourceId,
+              index: chunk.index
+            }),
+            method: 'DELETE',
+            headers: { 'if-match': chunk.etag }
+          })
+          assert.equal(deleted.status, 204)
         }
         const afterDelete = await alice.rootClient.request({
           url: listUrl,

@@ -1,10 +1,20 @@
 # @interop/pws-conformance-suite Changelog
 
+## 0.34.0 - TBD
+
+### Changed
+
+- The chunk listing case (`chunks.list-reflects-stored-and-empty`) asserts each
+  listed entry carries `etag`, equal to the `ETag` the chunk's own `GET` and
+  `HEAD` serve, that a `DELETE` pinned with `If-Match` on another entry's `etag`
+  answers 412, and that one pinned on the entry's own succeeds.
+
 ## 0.33.0 - 2026-10-25
 
 ### Changed
 
-- **BREAKING**: Rename `was` to `pws` in package.json, README.md, and CHANGELOG.md.
+- **BREAKING**: Rename `was` to `pws` in package.json, README.md, and
+  CHANGELOG.md.
 
 ## 0.32.0 - 2026-10-23
 
