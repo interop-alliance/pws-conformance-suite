@@ -29,17 +29,17 @@ function readToolVersion(): string {
 }
 
 /**
- * Best-effort `@interop/was-client` version: its package.json is not exported,
+ * Best-effort `@interop/pws-client` version: its package.json is not exported,
  * so resolve the entry module and walk up to the owning package manifest.
  */
 function readClientVersion(): string | undefined {
   try {
     const require = createRequire(import.meta.url)
-    let dir = dirname(require.resolve('@interop/was-client'))
+    let dir = dirname(require.resolve('@interop/pws-client'))
     for (let i = 0; i < 8; i++) {
       try {
         const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'))
-        if (pkg.name === '@interop/was-client') {
+        if (pkg.name === '@interop/pws-client') {
           return pkg.version
         }
       } catch {

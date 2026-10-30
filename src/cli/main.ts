@@ -2,12 +2,13 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The testable core of the `was-conformance` CLI: parse argv into a config,
+ * The testable core of the `pws-conformance` CLI: parse argv into a config,
  * run the suite through the injected `runConformance`, stream events to the
  * chosen reporter, and map the result to an exit code. The bin entry
  * (`index.ts`) is a thin wrapper that binds the real process I/O to this.
  */
 import { parseArgs } from 'node:util'
+import { canonicalBaseServerUrl } from '@interop/pws-client/paths'
 import { runConformance } from '../index.js'
 import { createPrettyReporter } from './reporters/pretty.js'
 import { createJsonReporter } from './reporters/json.js'
@@ -27,7 +28,7 @@ export interface CliDeps {
   isTTY: boolean
   /** This tool's version, read from its package by the bin wrapper. */
   version: string
-  /** The `@interop/was-client` version, if cheaply resolvable. */
+  /** The `@interop/pws-client` version, if cheaply resolvable. */
   clientVersion?: string
 }
 
@@ -128,9 +129,13 @@ export function parseArgv(
     }
   }
   try {
-    new URL(serverUrl)
+    canonicalBaseServerUrl(serverUrl)
   } catch {
-    return { kind: 'usage', message: `invalid server URL: ${serverUrl}` }
+    return {
+      kind: 'usage',
+      message:
+        'invalid server URL: expected an absolute http(s) URL with no query, fragment, userinfo, or empty path segment'
+    }
   }
 
   const reporter = values.reporter ?? 'pretty'
@@ -243,20 +248,6 @@ function selectSuites(
   return shaped
 }
 
-/** Removes any userinfo/query/hash from a URL before it is reported/logged. */
-function redactUrl(url: string): string {
-  try {
-    const u = new URL(url)
-    u.username = ''
-    u.password = ''
-    u.search = ''
-    u.hash = ''
-    return u.toString()
-  } catch {
-    return url
-  }
-}
-
 /** Best-effort connectivity probe with a bounded timeout. */
 async function isReachable(
   fetchImpl: typeof fetch,
@@ -305,12 +296,10 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
     return 2
   }
 
-  const safeUrl = redactUrl(config.serverUrl)
-
   // Preflight: fail cleanly if the server cannot be reached, rather than
   // letting every suite cascade into connection failures.
   if (!(await isReachable(deps.fetch, config.serverUrl))) {
-    deps.stderr(`error: cannot reach ${safeUrl}\n`)
+    deps.stderr(`error: cannot reach ${config.serverUrl}\n`)
     return 2
   }
 
@@ -326,13 +315,13 @@ export async function main(argv: string[], deps: CliDeps): Promise<number> {
               clientVersion: deps.clientVersion
             })
           },
-          serverUrl: safeUrl
+          serverUrl: config.serverUrl
         })
       : createPrettyReporter({
           write: deps.stdout,
           color: deps.isTTY && !deps.env.NO_COLOR,
           includeOptional: config.includeOptional,
-          serverUrl: safeUrl
+          serverUrl: config.serverUrl
         })
 
   let report: RunReport

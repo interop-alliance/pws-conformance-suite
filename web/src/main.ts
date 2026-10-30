@@ -2,16 +2,17 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * The WAS conformance web app: a dependency-free, two-screen vanilla-TS UI that
+ * The PWS conformance web app: a dependency-free, two-screen vanilla-TS UI that
  * runs the identical conformance suite fully client-side (the `@interop` stack
  * is isomorphic and talks over `fetch`). Screen 1 is the setup form; screen 2
  * is the live run view. The onboarding token stays in the browser and is only
  * ever sent to the target server; the server URL alone may be shared via a
  * `?server=` query param.
  */
+import { canonicalBaseServerUrl } from '@interop/pws-client/paths'
 import { runConformance, suites } from '../../src/index.js'
 import pkg from '../../package.json'
-import { buildReportJson, formatMs, redactUrl, selectSuites } from './report.js'
+import { buildReportJson, formatMs, selectSuites } from './report.js'
 import { el, runningRow, testRow } from './view.js'
 import type { RunEvent, RunReport } from '../../src/index.js'
 import './app.css'
@@ -78,7 +79,7 @@ function setupScreen(): HTMLElement {
     field('Server URL', {
       class: 'mono',
       type: 'url',
-      placeholder: 'https://was.example.com',
+      placeholder: 'https://pws.example.com',
       dataset: { testid: 'server-url' }
     }),
     field('Onboarding token', {
@@ -112,7 +113,7 @@ function setupScreen(): HTMLElement {
   form.addEventListener('submit', onSubmit)
 
   return el('section', { dataset: { testid: 'setup-screen' } }, [
-    el('h1', { text: 'WAS Conformance Suite' }),
+    el('h1', { text: 'PWS Conformance Suite' }),
     form
   ])
 }
@@ -274,9 +275,12 @@ function onSubmit(event: SubmitEvent): void {
   // slash that would break every URL-shape assertion.
   const serverUrl = q<HTMLInputElement>('server-url').value.trim()
   try {
-    new URL(serverUrl)
+    canonicalBaseServerUrl(serverUrl)
   } catch {
-    return showFormError(formError, 'Enter a valid server URL.')
+    return showFormError(
+      formError,
+      'Enter an absolute http(s) server URL with no query, fragment, userinfo, or empty path segment.'
+    )
   }
 
   const suiteIds = suites
@@ -330,7 +334,7 @@ async function startRun({
       `Server unreachable from a browser: a network error or missing CORS ` +
         `support. If the server is running, it may not send CORS headers; the ` +
         `CLI has no CORS constraint: npx @interop/pws-conformance-suite ` +
-        redactUrl(serverUrl)
+        serverUrl
     )
     setRunning(false)
     return
@@ -472,7 +476,7 @@ function finishRun(
 
   reportJson = buildReportJson({
     version: pkg.version,
-    serverUrl: redactUrl(serverUrl),
+    serverUrl,
     report
   })
   q<HTMLButtonElement>('copy-json').disabled = false
@@ -496,7 +500,7 @@ function resetRunScreen(serverUrl: string): void {
   reportJson = null
   renderCounts()
   q('duration').textContent = '0ms'
-  q('summary-server').textContent = redactUrl(serverUrl)
+  q('summary-server').textContent = serverUrl
   q('results').replaceChildren()
   const preflight = q('preflight-error')
   preflight.hidden = true

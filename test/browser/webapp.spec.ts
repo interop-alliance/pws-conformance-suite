@@ -36,15 +36,17 @@ test('setup form renders the suite registry and prefills ?server=', async ({
   ).toBeChecked()
 })
 
-test('an invalid server URL shows a form error and stays on the form', async ({
-  page
-}) => {
-  await page.goto(APP)
-  await page.getByTestId('server-url').fill('not a url')
-  await page.getByTestId('run-button').click()
-  await expect(page.getByTestId('form-error')).toBeVisible()
-  await expect(page.getByTestId('setup-screen')).toBeVisible()
-})
+for (const url of ['not a url', 'http://127.0.0.1:9/?']) {
+  test(`server URL "${url}" shows a form error and stays on the form`, async ({
+    page
+  }) => {
+    await page.goto(APP)
+    await page.getByTestId('server-url').fill(url)
+    await page.getByTestId('run-button').click()
+    await expect(page.getByTestId('form-error')).toBeVisible()
+    await expect(page.getByTestId('setup-screen')).toBeVisible()
+  })
+}
 
 test('an unreachable server shows the network/CORS diagnosis', async ({
   page

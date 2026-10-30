@@ -4,7 +4,7 @@
 /**
  * WAS conformance tests -- Collections API.
  */
-import { spaceUrlById } from '@interop/was-client/paths'
+import { spaceUrlById } from '@interop/pws-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { IZcap } from '@interop/data-integrity-core/zcap'
@@ -694,7 +694,7 @@ export const collectionApi: Suite<State> = {
           `/space/${alice.space1.id}/${collectionId}/`,
           serverUrl
         ).toString()
-        const zcap = await alice.was.grant({
+        const zcap = await alice.pws.grant({
           to: aliceDelegatedApp.did,
           actions: ['GET'],
           target: listTarget,

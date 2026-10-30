@@ -2,13 +2,13 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 import { ZcapClient } from '@interop/ezcap'
-import { WasClient } from '@interop/was-client'
+import { PwsClient } from '@interop/pws-client'
 import {
   spaceMetaUrl,
   spacesRepositoryUrl,
   spaceUrlById
-} from '@interop/was-client/paths'
-import type { Space } from '@interop/was-client'
+} from '@interop/pws-client/paths'
+import type { Space } from '@interop/pws-client'
 import { decodeSecretKeySeed } from '@digitalcredentials/bnid'
 import { EddsaJcs2022 } from '@interop/ed25519-signature/eddsa-jcs-2022'
 import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
@@ -33,7 +33,7 @@ const secretKeySeeds = {
 /**
  * The suite's ZcapClient: delegation proofs are signed with `eddsa-jcs-2022`,
  * which canonicalizes with JCS and so needs no JSON-LD document loader at
- * signing time. That is what WAS clients now emit, so the required tests
+ * signing time. That is what PWS clients now emit, so the required tests
  * exercise the suite a server actually meets. `Ed25519Signature2020` is not
  * gone from the suite: the optional `delegation-cryptosuites` suite asserts a
  * server still accepts it, and accepts a chain that mixes the two.
@@ -51,23 +51,23 @@ export function zcapClient({ signer }: { signer: ISigner }): ZcapClient {
 }
 
 /**
- * Builds a high-level WAS client wrapping a ZcapClient for the given signer.
+ * Builds a high-level PWS client wrapping a ZcapClient for the given signer.
  * The `serverUrl` is the server's base server URL, passed to the client as
  * `baseServerUrl`.
  *
  * @param options {object}
  * @param options.serverUrl {string}
  * @param options.signer {ISigner}
- * @returns {WasClient}
+ * @returns {PwsClient}
  */
-export function wasClient({
+export function pwsClient({
   serverUrl,
   signer
 }: {
   serverUrl: string
   signer: ISigner
-}): WasClient {
-  return new WasClient({
+}): PwsClient {
+  return new PwsClient({
     baseServerUrl: serverUrl,
     zcapClient: zcapClient({ signer })
   })
@@ -103,8 +103,8 @@ export async function buildZcapClients({
       signer: aliceSigner,
       // Low-level ZcapClient -- kept for raw request()/delegate() calls.
       rootClient: zcapClient({ signer: aliceSigner }),
-      // High-level WAS client wrapping the same signer.
-      was: wasClient({ serverUrl, signer: aliceSigner })
+      // High-level PWS client wrapping the same signer.
+      pws: pwsClient({ serverUrl, signer: aliceSigner })
     },
     aliceDelegatedApp: {
       did: aliceDelegatedAppDid,
@@ -114,7 +114,7 @@ export async function buildZcapClients({
       did: bobRootDid,
       signer: bobSigner,
       rootClient: zcapClient({ signer: bobSigner }),
-      was: wasClient({ serverUrl, signer: bobSigner })
+      pws: pwsClient({ serverUrl, signer: bobSigner })
     }
   }
 }
@@ -145,10 +145,10 @@ async function postSpaceWithToken({
 
 /**
  * Creates a space on the server using an onboarding token (if configured) or
- * the WAS client. Returns a normalized response object for consistent
+ * the PWS client. Returns a normalized response object for consistent
  * assertion.
  *
- * The ZCap path goes through `WasClient.request()` -- the client's signed
+ * The ZCap path goes through `PwsClient.request()` -- the client's signed
  * escape hatch -- so the conformance harness exercises the client while still
  * surfacing the raw status/headers/data the create-space assertions rely on.
  *
@@ -180,11 +180,11 @@ export async function createSpace({
     const data = await response.json()
     return { status: response.status, headers: response.headers, data }
   }
-  const was = new WasClient({
+  const pws = new PwsClient({
     baseServerUrl: serverUrl,
     zcapClient: rootClient
   })
-  const response = await was.request({
+  const response = await pws.request({
     url: spacesRepositoryUrl({ baseServerUrl: serverUrl }),
     method: 'POST',
     json: spaceDescription
@@ -262,7 +262,7 @@ export async function createSpaceByPut({
 }
 
 /**
- * Provisions a Space for the high-level `WasClient` suites: with an onboarding
+ * Provisions a Space for the high-level `PwsClient` suites: with an onboarding
  * token configured, creates it via the token path (a plain fetch with
  * `Authorization: Bearer`, the same wire form `createSpace` above uses) and
  * returns the client's lazy handle to the new id; otherwise delegates to the
@@ -272,36 +272,36 @@ export async function createSpaceByPut({
  * @param options {object}
  * @param options.serverUrl {string}
  * @param options.onboardingToken {string|null}
- * @param options.was {WasClient} the suite's high-level client
+ * @param options.pws {PwsClient} the suite's high-level client
  * @param [options.name] {string} optional Space name
  * @returns {Promise<Space>}
  */
 export async function provisionSpace({
   serverUrl,
   onboardingToken,
-  was,
+  pws,
   name
 }: {
   serverUrl: string
   onboardingToken: string | null
-  was: WasClient
+  pws: PwsClient
   name?: string
 }): Promise<Space> {
   if (!onboardingToken) {
-    return was.createSpace({ name })
+    return pws.createSpace({ name })
   }
   const id = uuidv4()
   const response = await postSpaceWithToken({
     serverUrl,
     onboardingToken,
-    spaceDescription: { id, name, controller: was.controllerDid }
+    spaceDescription: { id, name, controller: pws.controllerDid }
   })
   if (response.status !== 201) {
     throw new Error(
       `Onboarding-token Create Space failed with status ${response.status}`
     )
   }
-  return was.space(id)
+  return pws.space(id)
 }
 
 /**
@@ -573,9 +573,9 @@ export async function createContext({
         rootClient,
         ...(headers && { headers })
       }),
-    provisionSpace: ({ was, name }) =>
-      provisionSpace({ serverUrl, onboardingToken, was, name }),
-    wasClient: ({ signer }) => wasClient({ serverUrl, signer }),
+    provisionSpace: ({ pws, name }) =>
+      provisionSpace({ serverUrl, onboardingToken, pws, name }),
+    pwsClient: ({ signer }) => pwsClient({ serverUrl, signer }),
     zcapClient,
     generateId: uuidv4,
     withoutCreatedBy

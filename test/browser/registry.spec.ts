@@ -4,7 +4,7 @@ import { suites } from '../../src/suites/index.js'
 
 /**
  * Browser-compat smoke: importing the library in a browser pulls in the whole
- * suite registry and its dependency stack (was-client incl. tar handling,
+ * suite registry and its dependency stack (pws-client incl. tar handling,
  * ezcap, ed25519 packages, bnid). `createContext` additionally exercises
  * deterministic did:key generation in the browser.
  */

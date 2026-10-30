@@ -2,9 +2,9 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * WAS conformance tests -- high-level WasClient: BYOS backend registration.
+ * WAS conformance tests -- high-level PwsClient: BYOS backend registration.
  *
- * Drives the published `@interop/was-client` backend-registration control plane
+ * Drives the published `@interop/pws-client` backend-registration control plane
  * (`space.registerBackend` / `updateBackend` / `deregisterBackend`, and
  * selecting a registered backend on a Collection) against a live server, the
  * write side of the spec's "Backends" section. The reference server registers no
@@ -15,8 +15,8 @@
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
 
-import { ConflictError, ValidationError } from '@interop/was-client'
-import type { Space, BackendRegistration } from '@interop/was-client'
+import { ConflictError, ValidationError } from '@interop/pws-client'
+import type { Space, BackendRegistration } from '@interop/pws-client'
 
 interface State {
   alice: any
@@ -27,7 +27,7 @@ interface State {
 
 export const clientBackends: Suite<State> = {
   id: 'client-backends',
-  name: 'WasClient — BYOS backend registration',
+  name: 'PwsClient -- BYOS backend registration',
 
   setup: async ctx => {
     // Shallow-clone the shared actor so per-suite scratch fields do not leak
@@ -37,7 +37,7 @@ export const clientBackends: Suite<State> = {
 
     // Creates a space via the high-level client and registers it for teardown.
     const newSpace = async (name: string): Promise<Space> => {
-      const space = await ctx.provisionSpace({ was: alice.was, name })
+      const space = await ctx.provisionSpace({ pws: alice.pws, name })
       createdSpaces.push(space)
       return space
     }

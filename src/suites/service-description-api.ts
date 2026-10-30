@@ -15,7 +15,7 @@
  * exist (an absent Space still carries the header, and the no-slash-to-slash
  * redirect reads no ids).
  */
-import { spacesRepositoryUrl } from '@interop/was-client/paths'
+import { spacesRepositoryUrl } from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
 

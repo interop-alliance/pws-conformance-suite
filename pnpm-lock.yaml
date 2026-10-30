@@ -21,8 +21,8 @@ importers:
         specifier: ^8.2.2
         version: 8.2.2
       '@interop/ezcap':
-        specifier: ^7.5.3
-        version: 7.5.3
+        specifier: ^7.5.4
+        version: 7.5.4
       '@interop/http-digest-header':
         specifier: ^3.2.0
         version: 3.2.0
@@ -42,9 +42,9 @@ importers:
       '@eslint/js':
         specifier: ^10.0.1
         version: 10.0.1(eslint@10.12.0)
-      '@interop/was-client':
-        specifier: ^0.100.1
-        version: 0.100.1(@interop/jsonld-signatures@11.9.0)
+      '@interop/pws-client':
+        specifier: ^0.104.0
+        version: 0.104.0(@interop/jsonld-signatures@11.9.0)
       '@playwright/test':
         specifier: ^1.60.0
         version: 1.64.0
@@ -251,13 +251,9 @@ packages:
     resolution: {integrity: sha512-4L7WlVxw4D7gQ80RWP40GVlAIq2ptY4qqKH863k3iy+LJAuNnPes8RrVwxzKv0FUEjFI8AdrZ/fdnLD2yoCr5A==}
     engines: {node: '>=24.0'}
 
-  '@interop/did-method-webvh@5.17.0':
-    resolution: {integrity: sha512-uiRbttXN0zLF29U1ETMz7PIBnPXp/vut0+wnMj7y6YrUIBXA0tXrqYuziN1Cl6I4EQ0qORuYgRk9j8s8pb7IYA==}
+  '@interop/did-method-webvh@5.18.0':
+    resolution: {integrity: sha512-cczC3D9sY+canwuxBDRqxkdkwL2pnnOU0hRrFnjy5spAkyuawPtCZvyZXE44s8gMRlZ7h1flsmTjrqHLR1UAUQ==}
     engines: {node: '>=22'}
-
-  '@interop/ecdsa-multikey@2.4.1':
-    resolution: {integrity: sha512-5wO80orZPnUKGAQNBWlJqScUyTj+PgUXMIliQS2AM8fg0icu6OZPPteHBTgYbG9kGRxG7/b/wBVviJJNG9IXpQ==}
-    engines: {node: '>=24.0'}
 
   '@interop/ecdsa-multikey@2.4.2':
     resolution: {integrity: sha512-qTNEf251RIz1KkW1TKxH1oty6i8JlOK2+Lw6rAxaeUoAYY+vgRswv6aWn39aDMPyf+eHhzQzQEZlqX/ZSbOCXg==}
@@ -265,15 +261,6 @@ packages:
 
   '@interop/ecdsa-signature@2.0.10':
     resolution: {integrity: sha512-VwA2ZLJbUiN/3kumHyp+4A2DcB+lc7Ak/aSkC1KT+ePuI39YZWyra4oqm+ERwksDXVkHS+uN4YK4/xc9Ucg8ag==}
-    engines: {node: '>=24.0'}
-    peerDependencies:
-      '@interop/jsonld-signatures': ^11.6.7
-    peerDependenciesMeta:
-      '@interop/jsonld-signatures':
-        optional: true
-
-  '@interop/ecdsa-signature@2.0.8':
-    resolution: {integrity: sha512-y6RiyvnithIIYFNBLj6jmrj17pOYFvv0EvwRjXR6bnzcxdxqphNJyWq9xP9U2Fq9ksIMexT/syRvEi1wmW0x7A==}
     engines: {node: '>=24.0'}
     peerDependencies:
       '@interop/jsonld-signatures': ^11.6.7
@@ -307,10 +294,6 @@ packages:
     peerDependenciesMeta:
       react-native-get-random-values:
         optional: true
-
-  '@interop/ezcap@7.5.3':
-    resolution: {integrity: sha512-Rh1I7liJN9L1aOMPAn2dyrJ+mluFr+6YJQbqrdYZDQcbY31GLBOiGQ2j+0L7TpYS0zEE+iIayq/no3S/N0FldA==}
-    engines: {node: '>=20.0'}
 
   '@interop/ezcap@7.5.4':
     resolution: {integrity: sha512-0EwWsxiu2dH7UM8I9H+tlhT+c139i7yhuBHM/IRyxsgJk5EFiVz9feH0xWsrdn3hoSghDPdGIz8l0Ps7oVo9fQ==}
@@ -353,28 +336,20 @@ packages:
     resolution: {integrity: sha512-2IW190KLOH7GmUqwD7Wg82bc9dC5DYxRpgW5Z+MV87CxsVOu5wRNXr7Bd7Bne0bo3XU04r4lAVq4KB3eJuHbig==}
     engines: {node: '>=24.0'}
 
-  '@interop/storage-core@0.38.0':
-    resolution: {integrity: sha512-wavRRv4uzKz9m21sdfZtOGeBy8TSgYWRgHTfq+SE7Dak/E2u77xmn4x7EaV4q3sPgmjFhSbz+YlzG6WpQor3mA==}
-    engines: {node: '>=22.0'}
-
-  '@interop/storage-core@0.42.0':
-    resolution: {integrity: sha512-9ERs9uKOQn6FtBzuDmBkZeCVUZS4+g7W5ZICd9/uoFddjcngOWdGdx10LUaS7bdSb1Q3pDH9/HYhnVi0TrP8Zg==}
-    engines: {node: '>=22.0'}
-
-  '@interop/vh-resource-log@0.9.0':
-    resolution: {integrity: sha512-9QP1XExxu95IuHlB3b9V3QKAKF4tLbp+agF4YByVlywgWcSrUCRD9YxYctacummgPIQTTV+iKBMZJIu72i8OnQ==}
+  '@interop/pws-client@0.104.0':
+    resolution: {integrity: sha512-If1ZihvdZBdCc/RHnjCacDISmx7SMXBPvRcMeJeGsOwY6Vi9fgy66+4dBaOFF0LDjOXnfzZsPn0xCbzMVDz8pQ==}
     engines: {node: '>=24.0'}
 
-  '@interop/was-client@0.100.1':
-    resolution: {integrity: sha512-xwzVVrsD/SuWciJXzNtCV3Lnq3vVby/YdleDOxACGRy999GQmgXTtTuDpu8ir/RC3CSRynS6Z6jSZZ8of7M0vQ==}
+  '@interop/storage-core@0.43.0':
+    resolution: {integrity: sha512-pa9aoh1WgeKqodIvi74iYR1mQm6v3rpQYbyzvQs73XPE4p01EN7Sh8wkOGZ7hyZTdwPRHd5oDeS2G2qwnUCRMA==}
+    engines: {node: '>=22.0'}
+
+  '@interop/vh-resource-log@0.10.1':
+    resolution: {integrity: sha512-6WGeYO3jdFHsfrFLmqZhcpdXVlXnxY2DNUDMmAKDU3esw3dNUC4SjwrDtUPLdaODu3ww7GCfBdrHBKExRVRViA==}
     engines: {node: '>=24.0'}
 
   '@interop/x25519-key-agreement-key@5.4.3':
     resolution: {integrity: sha512-B9/nkteXhceT1Psy+0Lwg4R4JzW6TUYDe8AgPIc3nsQKOCdIQ4MjjUPy9/kQ7eTnzW+GR0FcTSKDy6/GQqlwdQ==}
-    engines: {node: '>=24.0'}
-
-  '@interop/zcap@11.3.5':
-    resolution: {integrity: sha512-7mJm1flEt9QdEmxQ7jKJKIu4uv0cibz6gA2mqFb1Ox2h12Cv2oM6LXbKcc7o06I5kLGFjVx8IgHQLMnu3Fhwrg==}
     engines: {node: '>=24.0'}
 
   '@interop/zcap@11.4.0':
@@ -2361,18 +2336,13 @@ snapshots:
       '@noble/hashes': 2.4.0
       '@scure/base': 2.4.0
 
-  '@interop/did-method-webvh@5.17.0':
+  '@interop/did-method-webvh@5.18.0':
     dependencies:
       '@interop/data-integrity-core': 8.9.0
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
       '@scure/base': 2.4.0
       json-canonicalize: 3.0.0
-
-  '@interop/ecdsa-multikey@2.4.1':
-    dependencies:
-      '@interop/data-integrity-core': 8.8.0
-      '@scure/base': 2.4.0
 
   '@interop/ecdsa-multikey@2.4.2':
     dependencies:
@@ -2382,15 +2352,6 @@ snapshots:
   '@interop/ecdsa-signature@2.0.10(@interop/jsonld-signatures@11.9.0)':
     dependencies:
       '@interop/ecdsa-multikey': 2.4.2
-      '@interop/jsonld': 9.0.3
-      canonicalize: 3.0.0
-      rdf-canonize: 5.0.0
-    optionalDependencies:
-      '@interop/jsonld-signatures': 11.9.0
-
-  '@interop/ecdsa-signature@2.0.8(@interop/jsonld-signatures@11.9.0)':
-    dependencies:
-      '@interop/ecdsa-multikey': 2.4.1
       '@interop/jsonld': 9.0.3
       canonicalize: 3.0.0
       rdf-canonize: 5.0.0
@@ -2429,18 +2390,6 @@ snapshots:
       '@scure/base': 2.4.0
       canonicalize: 3.0.0
       split-string: 6.1.0
-    transitivePeerDependencies:
-      - expo-crypto
-
-  '@interop/ezcap@7.5.3':
-    dependencies:
-      '@interop/data-integrity-core': 8.9.0
-      '@interop/data-integrity-proof': 3.4.8
-      '@interop/ecdsa-signature': 2.0.8(@interop/jsonld-signatures@11.9.0)
-      '@interop/http-client': 1.0.5
-      '@interop/http-signature-zcap-invoke': 6.3.0
-      '@interop/jsonld-signatures': 11.9.0
-      '@interop/zcap': 11.3.5
     transitivePeerDependencies:
       - expo-crypto
 
@@ -2506,20 +2455,7 @@ snapshots:
       '@stablelib/chacha': 2.0.1
       '@stablelib/chacha20poly1305': 2.0.1
 
-  '@interop/storage-core@0.38.0':
-    dependencies:
-      '@interop/data-integrity-core': 8.9.0
-
-  '@interop/storage-core@0.42.0':
-    dependencies:
-      '@interop/data-integrity-core': 8.9.0
-
-  '@interop/vh-resource-log@0.9.0':
-    dependencies:
-      '@interop/did-method-webvh': 5.17.0
-      '@interop/storage-core': 0.38.0
-
-  '@interop/was-client@0.100.1(@interop/jsonld-signatures@11.9.0)':
+  '@interop/pws-client@0.104.0(@interop/jsonld-signatures@11.9.0)':
     dependencies:
       '@interop/capability-agent': 0.2.2
       '@interop/data-integrity-core': 8.9.0
@@ -2528,8 +2464,8 @@ snapshots:
       '@interop/ezcap': 7.5.4
       '@interop/http-client': 1.0.5
       '@interop/minimal-cipher': 7.11.1
-      '@interop/storage-core': 0.42.0
-      '@interop/vh-resource-log': 0.9.0
+      '@interop/storage-core': 0.43.0
+      '@interop/vh-resource-log': 0.10.1
       '@interop/x25519-key-agreement-key': 5.4.3
       '@interop/zcap': 11.4.0
       '@noble/hashes': 2.4.0
@@ -2540,17 +2476,20 @@ snapshots:
       - expo-crypto
       - react-native-get-random-values
 
+  '@interop/storage-core@0.43.0':
+    dependencies:
+      '@interop/data-integrity-core': 8.9.0
+
+  '@interop/vh-resource-log@0.10.1':
+    dependencies:
+      '@interop/did-method-webvh': 5.18.0
+      '@interop/storage-core': 0.43.0
+
   '@interop/x25519-key-agreement-key@5.4.3':
     dependencies:
       '@interop/data-integrity-core': 8.9.0
       '@noble/curves': 2.4.0
       '@scure/base': 2.4.0
-
-  '@interop/zcap@11.3.5':
-    dependencies:
-      '@digitalbazaar/zcap-context': 2.0.1
-      '@interop/data-integrity-core': 8.9.0
-      '@interop/jsonld-signatures': 11.9.0
 
   '@interop/zcap@11.4.0':
     dependencies:

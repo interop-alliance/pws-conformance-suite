@@ -2,16 +2,16 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * WAS conformance tests -- high-level WasClient: Resources (JSON + binary).
+ * WAS conformance tests -- high-level PwsClient: Resources (JSON + binary).
  *
- * Drives the published `@interop/was-client` against a live server, covering the
+ * Drives the published `@interop/pws-client` against a live server, covering the
  * client's JSON-vs-binary handling and the null-on-404 read semantics end to
  * end.
  */
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
 
-import type { Collection, Space } from '@interop/was-client'
+import type { Collection, Space } from '@interop/pws-client'
 
 interface State {
   alice: any
@@ -22,14 +22,14 @@ interface State {
 
 export const clientResources: Suite<State> = {
   id: 'client-resources',
-  name: 'WasClient — Resources',
+  name: 'PwsClient -- Resources',
 
   setup: async ctx => {
     // Shallow-clone the shared actor so per-suite scratch fields do not leak
     // into other suites.
     const alice: any = { ...ctx.actors.alice }
     const space = await ctx.provisionSpace({
-      was: alice.was,
+      pws: alice.pws,
       name: 'Resources Space'
     })
     const jsonCollection = await space.createCollection({

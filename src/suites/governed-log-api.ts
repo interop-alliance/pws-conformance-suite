@@ -26,7 +26,7 @@
  * primitive: the body is `text/jsonl` (not JSON, which the high-level clients
  * would parse), and a 304 or a problem response is read like any other.
  */
-import { spaceUrlById } from '@interop/was-client/paths'
+import { spaceUrlById } from '@interop/pws-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import assert from '../harness/assert.js'
@@ -805,7 +805,7 @@ export const governedLogApi: Suite<State> = {
         // A Space-rooted grant: the chain descends from the Space's root
         // capability to the Collection's items subtree, which the log URL
         // sits under.
-        const capability = await alice.was.grant({
+        const capability = await alice.pws.grant({
           to: aliceDelegatedApp.did,
           actions: ['GET'],
           target: `${collectionUrl(collectionId)}/`,

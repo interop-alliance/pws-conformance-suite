@@ -106,8 +106,20 @@ describe('parseArgv', () => {
     expect(r).toMatchObject({ kind: 'usage' })
   })
 
-  it('rejects an unparseable server URL', () => {
-    const r = parseArgv(['not a url'], {})
+  it.each([
+    ['unparseable', 'not a url'],
+    ['non-http(s)', 'ftp://s.test/'],
+    ['with a query', 'https://s.test/?a=1'],
+    ['with a bare trailing ?', 'https://s.test/?'],
+    ['with a bare trailing #', 'https://s.test/#'],
+    ['with userinfo', 'https://user@s.test/'],
+    ['with an empty path segment', 'https://s.test//pws']
+  ])('rejects a server URL that is %s', (_label, url) => {
+    expect(parseArgv([url], {}).kind).toBe('usage')
+  })
+
+  it('applies the same rule to TEST_SERVER_URL', () => {
+    const r = parseArgv([], { TEST_SERVER_URL: 'https://s.test/?' })
     expect(r.kind).toBe('usage')
   })
 
@@ -448,26 +460,34 @@ describe('json reporter', () => {
     expect(doc.counts.pass).toBe(1)
   })
 
-  it('elides userinfo/query from the reported server URL (via main)', async () => {
+  it('refuses a URL with credentials before probing, without echoing them', async () => {
     const out: string[] = []
     const err: string[] = []
+    let probed = false
     const deps: CliDeps = {
       runConformance: fakeRun({
         conformant: true,
         counts: counts({ pass: 1, total: 1 })
       }),
       suites: fakeRegistry,
-      fetch: (async () => ({ status: 200 })) as unknown as typeof fetch,
+      fetch: (async () => {
+        probed = true
+        return { status: 200 }
+      }) as unknown as typeof fetch,
       stdout: t => out.push(t),
       stderr: t => err.push(t),
       env: {},
       isTTY: false,
       version: '9.9.9'
     }
-    await main(['https://user:pass@s.test/?token=abc', '-r', 'json'], deps)
-    const doc = JSON.parse(out.join(''))
-    expect(doc.serverUrl).not.toContain('user')
-    expect(doc.serverUrl).not.toContain('token')
-    expect(doc.serverUrl).toContain('s.test')
+    const code = await main(
+      ['https://user:pass@s.test/?token=abc', '-r', 'json'],
+      deps
+    )
+    expect(code).toBe(2)
+    expect(probed).toBe(false)
+    expect(err.join('')).toContain('invalid server URL')
+    expect(err.join('')).not.toContain('user:pass')
+    expect(err.join('')).not.toContain('token=abc')
   })
 })

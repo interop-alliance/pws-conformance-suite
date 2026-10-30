@@ -2,13 +2,13 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * WAS conformance tests -- high-level WasClient: Delegation.
+ * WAS conformance tests -- high-level PwsClient: Delegation.
  *
  * Exercises the client's grant / `fromCapability` round-trip against a live
  * server: Alice delegates access to Bob, who rebuilds a handle from the signed
  * capability and reads (but cannot write beyond the grant).
  */
-import { Space, Resource } from '@interop/was-client'
+import { Space, Resource } from '@interop/pws-client'
 
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
@@ -22,7 +22,7 @@ interface State {
 
 export const clientDelegation: Suite<State> = {
   id: 'client-delegation',
-  name: 'WasClient — Delegation',
+  name: 'PwsClient -- Delegation',
 
   setup: async ctx => {
     // Shallow-clone the shared actors so per-suite scratch fields do not leak
@@ -38,7 +38,7 @@ export const clientDelegation: Suite<State> = {
      * @returns {Promise<Space>}
      */
     async function newSpace(name: string): Promise<Space> {
-      const space = await ctx.provisionSpace({ was: alice.was, name })
+      const space = await ctx.provisionSpace({ pws: alice.pws, name })
       createdSpaces.push(space)
       return space
     }
@@ -67,7 +67,7 @@ export const clientDelegation: Suite<State> = {
       run: async (ctx, state) => {
         const { newSpace, bob } = state
         const space = await newSpace('Private')
-        const seenByBob = await bob.was.spaceAt(space.url).describe()
+        const seenByBob = await bob.pws.spaceAt(space.url).describe()
         assert.equal(seenByBob, null)
       }
     },
@@ -83,7 +83,7 @@ export const clientDelegation: Suite<State> = {
         const space = await newSpace('Shared Space')
         const zcap = await space.grant({ to: bob.did, actions: ['GET'] })
 
-        const handle = bob.was.fromCapability(zcap)
+        const handle = bob.pws.fromCapability(zcap)
         assert.ok(handle instanceof Space)
         const description = await handle.describe()
         assert.equal(description?.name, 'Shared Space')
@@ -111,7 +111,7 @@ export const clientDelegation: Suite<State> = {
         })
         assert.deepStrictEqual(zcap.allowedAction, ['GET'])
 
-        const handle = bob.was.fromCapability(zcap)
+        const handle = bob.pws.fromCapability(zcap)
         assert.ok(handle instanceof Resource)
         assert.equal(((await handle.get()) as any).secret, 'value')
 

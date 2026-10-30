@@ -15,7 +15,7 @@ export {
   createSpace,
   generateId,
   provisionSpace,
-  wasClient,
+  pwsClient,
   withoutCreatedBy,
   withoutCreatingStamp,
   withoutReplicas,

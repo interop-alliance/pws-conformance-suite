@@ -127,11 +127,11 @@ The available suite ids (for `--suite`) are:
 | `blinded-index-api`         | Blinded-index query profile                             |
 | `changes-query-api`         | Collection changes query profile                        |
 | `chunks-api`                | Chunked Resources API                                   |
-| `client-backends`           | WasClient -- BYOS backend registration                  |
-| `client-delegation`         | WasClient -- Delegation                                 |
-| `client-export-import`      | WasClient -- Export / Import                            |
-| `client-resources`          | WasClient -- Resources                                  |
-| `client-spaces`             | WasClient -- Spaces & Collections                       |
+| `client-backends`           | PwsClient -- BYOS backend registration                  |
+| `client-delegation`         | PwsClient -- Delegation                                 |
+| `client-export-import`      | PwsClient -- Export / Import                            |
+| `client-resources`          | PwsClient -- Resources                                  |
+| `client-spaces`             | PwsClient -- Spaces & Collections                       |
 | `collection-api`            | Collections API                                         |
 | `conditional-requests-api`  | Conditional requests & caching                          |
 | `container-rule-api`        | The container rule                                      |

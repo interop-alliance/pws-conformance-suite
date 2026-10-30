@@ -46,7 +46,7 @@ function show(value: unknown): string {
  * @param options.write {Function} sink for a chunk of output (no trailing \n)
  * @param options.color {boolean} whether to emit ANSI color
  * @param options.includeOptional {boolean} render optional failures as failures
- * @param options.serverUrl {string} the (redacted) target URL, for the header
+ * @param options.serverUrl {string} the target URL, for the header
  * @returns {(event: RunEvent) => void}
  */
 export function createPrettyReporter({
@@ -90,7 +90,7 @@ export function createPrettyReporter({
     switch (event.type) {
       case 'run-start': {
         line()
-        line(s.bold!('WAS Conformance Suite'))
+        line(s.bold!('PWS Conformance Suite'))
         line(`${s.gray!('server:')} ${serverUrl}`)
         line(
           `${s.gray!('running')} ${event.testCount} ${s.gray!(

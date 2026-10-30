@@ -2,13 +2,13 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * WAS conformance tests -- high-level WasClient: Export / Import.
+ * WAS conformance tests -- high-level PwsClient: Export / Import.
  *
  * Exercises the client's whole-space tar export and import against a live
  * server: export a populated space, then import the archive into a fresh one.
  */
-import type { Space } from '@interop/was-client'
-import { resourceUrl } from '@interop/was-client/paths'
+import type { Space } from '@interop/pws-client'
+import { resourceUrl } from '@interop/pws-client/paths'
 
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
@@ -21,7 +21,7 @@ interface State {
 
 export const clientExportImport: Suite<State> = {
   id: 'client-export-import',
-  name: 'WasClient — Export / Import',
+  name: 'PwsClient -- Export / Import',
 
   setup: async ctx => {
     // Shallow-clone the shared actor so per-suite scratch fields do not leak
@@ -36,7 +36,7 @@ export const clientExportImport: Suite<State> = {
      * @returns {Promise<Space>}
      */
     async function newSpace(name: string): Promise<Space> {
-      const space = await ctx.provisionSpace({ was: alice.was, name })
+      const space = await ctx.provisionSpace({ pws: alice.pws, name })
       createdSpaces.push(space)
       return space
     }
@@ -70,7 +70,7 @@ export const clientExportImport: Suite<State> = {
         await collection.put('second', { body: 'two' })
         // Make the collection world-readable so we can verify the policy survives
         // the export/import round-trip.
-        await alice.was.request({
+        await alice.pws.request({
           url: `${source.url}notes/policy`,
           method: 'PUT',
           json: { type: 'PublicCanRead' }

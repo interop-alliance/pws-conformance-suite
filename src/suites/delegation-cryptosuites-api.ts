@@ -11,7 +11,7 @@
  *
  * The two are not on the same footing. The rest of this conformance suite signs
  * its delegations with `eddsa-jcs-2022`, which canonicalizes with JCS and so
- * costs no JSON-LD canonicalization; that is what current WAS clients emit, so
+ * costs no JSON-LD canonicalization; that is what current PWS clients emit, so
  * every delegated test in the required set already depends on a server
  * accepting it, and the test for it here is required too.
  *

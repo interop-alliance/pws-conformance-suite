@@ -116,7 +116,7 @@ async function delegateAndRevoke({
   })
   assert.equal(before.status, 200)
   try {
-    await alice.was.space(spaceId).revoke(capability)
+    await alice.pws.space(spaceId).revoke(capability)
   } catch (err: any) {
     if ([404, 405, 501].includes(err.status)) {
       ctx.skip('zcap revocation endpoint not implemented')

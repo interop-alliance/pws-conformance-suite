@@ -9,7 +9,7 @@
  * serves the document elsewhere is read correctly.
  */
 
-import { spacesRepositoryUrl } from '@interop/was-client/paths'
+import { spacesRepositoryUrl } from '@interop/pws-client/paths'
 
 /** The WAS core specification's self-declared persistent identifier. */
 export const PWS_SPEC_IDENTIFIER = 'https://w3id.org/pws'

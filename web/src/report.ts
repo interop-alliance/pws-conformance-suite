@@ -2,26 +2,12 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * App-side pure helpers: URL redaction, suite selection/shaping, and building
- * the JSON report document. These mirror the CLI's behavior (`redactUrl`,
- * `selectSuites`, and the JSON reporter's document shape) but are reimplemented
- * here because the CLI internals are Node-only and not exported.
+ * App-side pure helpers: suite selection/shaping and building the JSON report
+ * document. These mirror the CLI's behavior (`selectSuites` and the JSON
+ * reporter's document shape) but are reimplemented here because the CLI
+ * internals are Node-only and not exported.
  */
 import type { RunReport, Suite } from '../../src/index.js'
-
-/** Removes any userinfo/query/hash from a URL before it is reported/displayed. */
-export function redactUrl(url: string): string {
-  try {
-    const u = new URL(url)
-    u.username = ''
-    u.password = ''
-    u.search = ''
-    u.hash = ''
-    return u.toString()
-  } catch {
-    return url
-  }
-}
 
 /**
  * Restricts the registry to the checked suite ids and, under `skipOptional`,
@@ -62,7 +48,7 @@ export function selectSuites(
  *
  * @param options {object}
  * @param options.version {string} this tool's version
- * @param options.serverUrl {string} the redacted target URL
+ * @param options.serverUrl {string} the target URL
  * @param options.report {RunReport} the completed run report
  * @returns {string} the pretty-printed JSON document
  */

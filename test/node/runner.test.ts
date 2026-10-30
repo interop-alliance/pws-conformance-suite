@@ -30,7 +30,7 @@ function fakeContext(
     createSpace: notCalled('createSpace') as any,
     createSpaceByPut: notCalled('createSpaceByPut') as any,
     provisionSpace: notCalled('provisionSpace') as any,
-    wasClient: notCalled('wasClient') as any,
+    pwsClient: notCalled('pwsClient') as any,
     zcapClient: notCalled('zcapClient') as any,
     generateId: (() => 'fake-id') as any,
     withoutCreatedBy: (value: unknown) => value,

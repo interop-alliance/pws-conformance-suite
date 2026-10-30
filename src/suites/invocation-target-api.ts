@@ -24,7 +24,7 @@ import {
   collectionUrl as collectionUrlOf,
   resourceUrl,
   spaceUrlById
-} from '@interop/was-client/paths'
+} from '@interop/pws-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { IZcap } from '@interop/data-integrity-core/zcap'
@@ -210,7 +210,7 @@ export const invocationTargetApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws/authz-profile#capability-invocation'],
       run: async (ctx, state) => {
         const { alice, bob, docAUrl, docBUrl } = state
-        const zcap = await alice.was.grant({
+        const zcap = await alice.pws.grant({
           to: bob.did,
           actions: ['GET'],
           target: docAUrl,
@@ -233,7 +233,7 @@ export const invocationTargetApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws/authz-profile#capability-invocation'],
       run: async (ctx, state) => {
         const { alice, bob, docAUrl, docBUrl } = state
-        const zcap = await alice.was.grant({
+        const zcap = await alice.pws.grant({
           to: bob.did,
           actions: ['DELETE'],
           target: docAUrl,
@@ -266,7 +266,7 @@ export const invocationTargetApi: Suite<State> = {
         const { alice, bob, docAUrl, collectionUrl } = state
         // The inverse of target attenuation: a capability scoped to a child
         // URL must not authorize its parent container.
-        const zcap = await alice.was.grant({
+        const zcap = await alice.pws.grant({
           to: bob.did,
           actions: ['GET'],
           target: docAUrl,
@@ -291,7 +291,7 @@ export const invocationTargetApi: Suite<State> = {
         const { alice, bob, docAUrl, docCUrl } = state
         // Both Spaces are Alice's: the binding under test is the capability's
         // URL scope, not the identity of the delegating controller.
-        const zcap = await alice.was.grant({
+        const zcap = await alice.pws.grant({
           to: bob.did,
           actions: ['GET'],
           target: docAUrl,

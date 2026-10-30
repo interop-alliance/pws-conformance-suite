@@ -8,7 +8,7 @@ import assert from '../harness/assert.js'
 import { assertResourceWriteResponse, assertWriteStamp } from '../helpers.js'
 import type { Suite } from '../harness/types.js'
 
-import { Collection } from '@interop/was-client'
+import { Collection } from '@interop/pws-client'
 
 /**
  * A minimal conforming EDV Encrypted Document: the stored representation for an
@@ -131,12 +131,12 @@ export const encryptionDescriptorApi: Suite<State> = {
         // rebuilds a handle and reads the Metadata object, seeing the
         // descriptor (this is how a consuming app learns to decrypt with its
         // own keys).
-        const zcap = await alice.was
+        const zcap = await alice.pws
           .space(alice.space1.id)
           .collection('vault')
           .grant({ to: bob.did, actions: ['GET'] })
 
-        const handle = bob.was.fromCapability(zcap)
+        const handle = bob.pws.fromCapability(zcap)
         assert.ok(handle instanceof Collection)
         const metadata = (await handle.describe()) as any
         assert.deepStrictEqual(metadata.encryption, { scheme: 'edv' })

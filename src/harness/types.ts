@@ -1,26 +1,26 @@
 /*!
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
-import type { WasClient, Space } from '@interop/was-client'
+import type { PwsClient, Space } from '@interop/pws-client'
 import type { ZcapClient } from '@interop/ezcap'
 import type { ISigner } from '@interop/data-integrity-core'
 
 /**
  * A test identity with full (root) authority: a low-level ZcapClient for raw
- * request()/delegate() calls and a high-level WasClient wrapping the same
+ * request()/delegate() calls and a high-level PwsClient wrapping the same
  * signer. Suites may stash per-suite scratch data (space ids, etc.) on a
  * shallow clone of an actor -- never on the shared instance itself.
  */
 export interface Actor {
   did: string
   /**
-   * The identity's own signer. `rootClient` and `was` are built from it; a
+   * The identity's own signer. `rootClient` and `pws` are built from it; a
    * suite needs it directly only to build a client of its own, e.g. one signing
    * delegation proofs with a different cryptosuite.
    */
   signer: ISigner
   rootClient: ZcapClient
-  was: WasClient
+  pws: PwsClient
 }
 
 /** A delegated-app identity: no root authority, just a signer to invoke with. */
@@ -65,12 +65,12 @@ export interface ConformanceContext {
     headers?: Record<string, string>
   }) => Promise<{ status: number; headers: Headers; data: any }>
   /**
-   * Provisions a Space for the high-level WasClient suites, via the
+   * Provisions a Space for the high-level PwsClient suites, via the
    * onboarding token when configured, else the client's signed createSpace.
    */
-  provisionSpace: (options: { was: WasClient; name?: string }) => Promise<Space>
-  /** Builds a high-level WAS client for a signer, bound to this server. */
-  wasClient: (options: { signer: ISigner }) => WasClient
+  provisionSpace: (options: { pws: PwsClient; name?: string }) => Promise<Space>
+  /** Builds a high-level PWS client for a signer, bound to this server. */
+  pwsClient: (options: { signer: ISigner }) => PwsClient
   /** Builds a low-level ZCap client for a signer. */
   zcapClient: (options: { signer: ISigner }) => ZcapClient
   /** Generates a fresh UUID (space/collection/resource id). */

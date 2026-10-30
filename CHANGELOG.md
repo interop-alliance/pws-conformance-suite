@@ -1,5 +1,27 @@
 # @interop/pws-conformance-suite Changelog
 
+## 0.36.0 - TBD
+
+### Changed
+
+- **BREAKING**: `@interop/was-client` is replaced by `@interop/pws-client`
+  0.104.0 or later (peer range `>=0.104.0 <1.0.0`). Consumers must install the
+  new package.
+- **BREAKING**: Rename the harness's client surface to match. The identity field
+  `was` is `pws`, `ctx.wasClient` and the exported `wasClient` helper are
+  `pwsClient`, and `ctx.provisionSpace` takes `pws`.
+- **BREAKING**: The `client-*` suite display names read `PwsClient -- ...`, so
+  the suite `name` values in run reports change. No case or suite id changed.
+- The CLI banner and the web app's title, heading, and URL placeholder read PWS.
+- Reports and displayed output carry the server URL as given. The report's
+  `serverUrl` no longer gains a trailing slash or a normalized host.
+
+### Fixed
+
+- The CLI and web form apply the client's base server URL rule up front. A URL
+  with a query, fragment, userinfo, non-http(s) scheme, or empty path segment is
+  a usage error or form error.
+
 ## 0.35.0 - 2026-10-29
 
 ### Changed

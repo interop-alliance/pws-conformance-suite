@@ -2,9 +2,9 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * WAS conformance tests -- high-level WasClient: Spaces & Collections.
+ * WAS conformance tests -- high-level PwsClient: Spaces & Collections.
  *
- * Drives the published `@interop/was-client` against a live server over the
+ * Drives the published `@interop/pws-client` against a live server over the
  * HTTP contract, rather than the low-level `ZcapClient` used by the `*-api`
  * suites. This is where the client's own integration coverage lives, so the
  * client repo can stay free of any dependency on this server.
@@ -18,8 +18,8 @@ import {
   withoutWriteStamp
 } from '../helpers.js'
 
-import { NotFoundError } from '@interop/was-client'
-import type { Space } from '@interop/was-client'
+import { NotFoundError } from '@interop/pws-client'
+import type { Space } from '@interop/pws-client'
 
 interface State {
   alice: any
@@ -30,7 +30,7 @@ interface State {
 
 export const clientSpaces: Suite<State> = {
   id: 'client-spaces',
-  name: 'WasClient — Spaces & Collections',
+  name: 'PwsClient -- Spaces & Collections',
 
   setup: async ctx => {
     // Shallow-clone the shared actor so per-suite scratch fields do not leak
@@ -40,7 +40,7 @@ export const clientSpaces: Suite<State> = {
 
     // Creates a space via the high-level client and registers it for teardown.
     const newSpace = async (name: string): Promise<Space> => {
-      const space = await ctx.provisionSpace({ was: alice.was, name })
+      const space = await ctx.provisionSpace({ pws: alice.pws, name })
       createdSpaces.push(space)
       return space
     }
@@ -123,7 +123,7 @@ export const clientSpaces: Suite<State> = {
       specRefs: ['https://w3id.org/pws#read-space-operation'],
       run: async (ctx, state) => {
         const { alice } = state
-        const missing = await alice.was.space('no-such-space').describe()
+        const missing = await alice.pws.space('no-such-space').describe()
         assert.equal(missing, null)
       }
     },
@@ -165,7 +165,7 @@ export const clientSpaces: Suite<State> = {
         // A persistent external server may hold other spaces for Alice from
         // earlier runs, so assert containment rather than exact contents.
         const space = await newSpace('Listed Space')
-        const listing = await alice.was.listSpaces()
+        const listing = await alice.pws.listSpaces()
         assert.equal(listing.url, '/spaces/')
         assert.equal(listing.totalItems, listing.items.length)
         assert.deepStrictEqual(
@@ -187,7 +187,7 @@ export const clientSpaces: Suite<State> = {
       run: async (ctx, state) => {
         const { alice, newSpace } = state
         await newSpace('Typed Listing Space')
-        const listing = await alice.was.listSpaces()
+        const listing = await alice.pws.listSpaces()
         assert.ok(listing.items.length >= 1)
         // Every listed item, auxiliary Spaces included, carries the same
         // `type` array its Space Metadata object does.
@@ -196,7 +196,7 @@ export const clientSpaces: Suite<State> = {
             Array.isArray(item.type),
             `listed Space ${item.id} carries a type array`
           )
-          const metadata = await alice.was.space(item.id).describe()
+          const metadata = await alice.pws.space(item.id).describe()
           // A Space deleted between the listing and this read is skipped.
           if (metadata === null) {
             continue
@@ -264,7 +264,7 @@ export const clientSpaces: Suite<State> = {
       ],
       run: async (ctx, state) => {
         const { alice } = state
-        const orphan = alice.was.space('missing-space').collection('c')
+        const orphan = alice.pws.space('missing-space').collection('c')
         await assert.rejects(
           orphan.add({ hello: 'world' }),
           (err: unknown) => err instanceof NotFoundError
@@ -385,7 +385,7 @@ export const clientSpaces: Suite<State> = {
       specRefs: ['https://w3id.org/pws#space-backends-available'],
       run: async (ctx, state) => {
         const { alice } = state
-        assert.equal(await alice.was.space('no-such-space').backends(), null)
+        assert.equal(await alice.pws.space('no-such-space').backends(), null)
       }
     },
     {
@@ -455,7 +455,7 @@ export const clientSpaces: Suite<State> = {
       specRefs: ['https://w3id.org/pws#quotas'],
       run: async (ctx, state) => {
         const { alice } = state
-        assert.equal(await alice.was.space('no-such-space').quotas(), null)
+        assert.equal(await alice.pws.space('no-such-space').quotas(), null)
       }
     }
   ]

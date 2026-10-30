@@ -64,8 +64,9 @@ jobs:
           ./node_modules/.bin/pws-conformance --version
 
   # End-to-end guarantee that the extracted suite still tests a real server:
-  # check out was-teaching-server, boot it, and run the built CLI against it
-  # in both provisioning modes (open, and gated by an onboarding token).
+  # check out @interop/web-spaces-server, boot it, and run the built CLI
+  # against it in both provisioning modes (open, and gated by an onboarding
+  # token).
   self-test:
     runs-on: ubuntu-latest
     steps:
@@ -73,8 +74,8 @@ jobs:
 
       - uses: actions/checkout@v6
         with:
-          repository: interop-alliance/was-teaching-server
-          path: teaching-server
+          repository: interop-alliance/web-spaces-server
+          path: web-spaces-server
 
       - uses: actions/setup-node@v6
         with:
@@ -89,13 +90,13 @@ jobs:
       - name: Build
         run: pnpm run build
 
-      - name: Install teaching-server dependencies
+      - name: Install web-spaces-server dependencies
         run: pnpm install --frozen-lockfile
-        working-directory: teaching-server
+        working-directory: web-spaces-server
 
       # SERVER_URL and the CLI's target URL must be byte-identical (ZCap
       # invocation targets embed host:port), so both derive from one port.
-      - name: Run conformance CLI against the teaching server
+      - name: Run conformance CLI against web-spaces-server
         run: |
           set -euo pipefail
 
@@ -118,7 +119,7 @@ jobs:
             local data_dir
             data_dir="$(mktemp -d)"
             setsid bash -c \
-              "cd teaching-server && SERVER_URL='$url' PORT='$port' \
+              "cd web-spaces-server && SERVER_URL='$url' PORT='$port' \
                  WAS_DATA_DIR='$data_dir' \
                  $token_env pnpm exec tsx src/start.ts" \
               > "$log" 2>&1 &
@@ -132,7 +133,7 @@ jobs:
               sleep 0.5
             done
             if [ -z "$healthy" ]; then
-              echo "Teaching server did not become healthy on $url"
+              echo "web-spaces-server did not become healthy on $url"
               cat "$log"
               kill -- "-$pid" 2>/dev/null || true
               exit 1

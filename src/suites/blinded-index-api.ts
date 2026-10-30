@@ -19,7 +19,7 @@
  * sibling `changes` profile suite.
  *
  * The `codec path` group is the counterpart to that: instead of hand-built
- * envelopes it drives `@interop/was-client`'s EDV codec -- a collection
+ * envelopes it drives `@interop/pws-client`'s EDV codec -- a collection
  * provisioned with a blinding key, an attribute declared searchable, documents
  * written with `add()` and matched with `find()`. That is what proves the
  * tokens a real client computes are the tokens this server matches, which
@@ -32,13 +32,13 @@ import {
 } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
 
-import { ConflictError, WasClient } from '@interop/was-client'
-import type { Collection, FindPage, Space } from '@interop/was-client'
+import { ConflictError, PwsClient } from '@interop/pws-client'
+import type { Collection, FindPage, Space } from '@interop/pws-client'
 import {
   createEdvEncryption,
   ensureFirstEpoch,
   ownerRecipient
-} from '@interop/was-client/edv'
+} from '@interop/pws-client/edv'
 import type { IKeyAgreementKey } from '@interop/data-integrity-core'
 import { X25519KeyAgreementKey2020 } from '@interop/x25519-key-agreement-key'
 import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
@@ -46,7 +46,7 @@ import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
 /** The (opaque) HMAC key id every seeded envelope indexes under. */
 const HMAC_ID = 'did:key:zHmacBlindedIndexKeyA'
 
-/** The label of the group whose fixtures the was-client codec writes. */
+/** The label of the group whose fixtures the pws-client codec writes. */
 const CODEC_GROUP = 'codec path'
 
 interface State {
@@ -101,17 +101,17 @@ function envelope({
 }
 
 /**
- * Builds an encryption-capable WAS client over a fresh Ed25519 signer, plus
+ * Builds an encryption-capable PWS client over a fresh Ed25519 signer, plus
  * the X25519 key-agreement key the collection's first epoch (and its blinding
  * key) wraps to. The suite's shared actors carry plaintext clients only, so the
  * codec-path group needs its own identity and keystore.
  *
  * @param options {object}
  * @param options.serverUrl {string}   the server under test
- * @returns {Promise<{ was: WasClient, keyAgreementKey: IKeyAgreementKey }>}
+ * @returns {Promise<{ pws: PwsClient, keyAgreementKey: IKeyAgreementKey }>}
  */
 async function encryptedClient({ serverUrl }: { serverUrl: string }): Promise<{
-  was: WasClient
+  pws: PwsClient
   keyAgreementKey: IKeyAgreementKey
 }> {
   const keyPair = await Ed25519VerificationKey.generate()
@@ -133,7 +133,7 @@ async function encryptedClient({ serverUrl }: { serverUrl: string }): Promise<{
     resolveKeys: async () => ({ keyAgreementKey, keyResolver })
   })
   return {
-    was: WasClient.fromSigner({
+    pws: PwsClient.fromSigner({
       baseServerUrl: serverUrl,
       signer: keyPair.didKeySigner(),
       encryption
@@ -263,11 +263,11 @@ export const blindedIndexApi: Suite<State> = {
         }
         // A Space of its own, controlled by the encrypting client's DID: the
         // shared actors' clients hold no keys, so they cannot write here.
-        const { was, keyAgreementKey } = await encryptedClient({
+        const { pws, keyAgreementKey } = await encryptedClient({
           serverUrl: ctx.serverUrl
         })
         const space = await ctx.provisionSpace({
-          was,
+          pws,
           name: 'Blinded Codec Space'
         })
 
@@ -300,7 +300,7 @@ export const blindedIndexApi: Suite<State> = {
             recipients: [ownerRecipient({ keyAgreementKey })],
             blindedIndex: true
           })
-          const collection = was.spaceAt(space.url).collection(id)
+          const collection = pws.spaceAt(space.url).collection(id)
           await collection.declareIndex({
             attribute,
             ...(unique && { unique })

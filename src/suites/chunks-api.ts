@@ -24,7 +24,7 @@
  * never parses it (framing and any client-side encryption are the client's
  * concern). The parent Resource MUST already exist before any chunk is written.
  */
-import { spaceUrlById } from '@interop/was-client/paths'
+import { spaceUrlById } from '@interop/pws-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { IZcap } from '@interop/data-integrity-core/zcap'
@@ -803,7 +803,7 @@ export const chunksApi: Suite<State> = {
         // server rejects the invocation without performing it. (The reference
         // server permits an ancestor-scoped capability to attenuate down to a
         // descendant, so the binding is probed with a non-ancestor sibling.)
-        const zcap = await alice.was.grant({
+        const zcap = await alice.pws.grant({
           to: bob.did,
           actions: ['PUT'],
           target: chunkOneUrl,
