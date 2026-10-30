@@ -26,6 +26,7 @@
  * primitive: the body is `text/jsonl` (not JSON, which the high-level clients
  * would parse), and a 304 or a problem response is read like any other.
  */
+import { spaceUrlById } from '@interop/was-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import assert from '../harness/assert.js'
@@ -188,7 +189,11 @@ export const governedLogApi: Suite<State> = {
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
     const bob: any = { ...ctx.actors.bob }
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -803,7 +808,8 @@ export const governedLogApi: Suite<State> = {
         const capability = await alice.was.grant({
           to: aliceDelegatedApp.did,
           actions: ['GET'],
-          target: `${collectionUrl(collectionId)}/`
+          target: `${collectionUrl(collectionId)}/`,
+          spaceUrl: alice.space1.url
         })
         const read = await getLog({
           collectionId,

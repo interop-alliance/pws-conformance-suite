@@ -24,6 +24,7 @@
  * never parses it (framing and any client-side encryption are the client's
  * concern). The parent Resource MUST already exist before any chunk is written.
  */
+import { spaceUrlById } from '@interop/was-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { IZcap } from '@interop/data-integrity-core/zcap'
@@ -141,7 +142,11 @@ export const chunksApi: Suite<State> = {
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
     const bob: any = { ...ctx.actors.bob }
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -801,7 +806,8 @@ export const chunksApi: Suite<State> = {
         const zcap = await alice.was.grant({
           to: bob.did,
           actions: ['PUT'],
-          target: chunkOneUrl
+          target: chunkOneUrl,
+          spaceUrl: alice.space1.url
         })
         const response = await writeChunkAt({
           url: chunkZeroUrl,

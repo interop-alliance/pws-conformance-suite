@@ -20,6 +20,11 @@
  * the privacy-merged `not-found` (404) mask. Either way the target's content
  * must not be disclosed and the operation must not be performed.
  */
+import {
+  collectionUrl as collectionUrlOf,
+  resourceUrl,
+  spaceUrlById
+} from '@interop/was-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { IZcap } from '@interop/data-integrity-core/zcap'
@@ -106,7 +111,11 @@ export const invocationTargetApi: Suite<State> = {
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
     const bob: any = { ...ctx.actors.bob }
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
     alice.space2 = { id: ctx.generateId() }
     await ctx.createSpace({
       spaceDescription: {
@@ -125,24 +134,27 @@ export const invocationTargetApi: Suite<State> = {
       rootClient: alice.rootClient
     })
     // Space 1: a Collection with two sibling Resources.
-    const collectionUrl = new URL(
-      `/space/${alice.space1.id}/credentials/`,
-      ctx.serverUrl
-    ).toString()
+    const spaceUrl = alice.space1.url
+    const collectionUrl = collectionUrlOf({
+      spaceUrl,
+      collectionId: 'credentials'
+    })
     await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+      url: spaceUrl,
       method: 'POST',
       action: 'POST',
       json: { id: 'credentials', name: 'Verifiable Credentials' }
     })
-    const docAUrl = new URL(
-      `/space/${alice.space1.id}/credentials/doc-a`,
-      ctx.serverUrl
-    ).toString()
-    const docBUrl = new URL(
-      `/space/${alice.space1.id}/credentials/doc-b`,
-      ctx.serverUrl
-    ).toString()
+    const docAUrl = resourceUrl({
+      spaceUrl,
+      collectionId: 'credentials',
+      resourceId: 'doc-a'
+    })
+    const docBUrl = resourceUrl({
+      spaceUrl,
+      collectionId: 'credentials',
+      resourceId: 'doc-b'
+    })
     await alice.rootClient.request({
       url: docAUrl,
       method: 'PUT',
@@ -201,7 +213,8 @@ export const invocationTargetApi: Suite<State> = {
         const zcap = await alice.was.grant({
           to: bob.did,
           actions: ['GET'],
-          target: docAUrl
+          target: docAUrl,
+          spaceUrl: alice.space1.url
         })
         const response = await invokeCapabilityAt({
           url: docBUrl,
@@ -223,7 +236,8 @@ export const invocationTargetApi: Suite<State> = {
         const zcap = await alice.was.grant({
           to: bob.did,
           actions: ['DELETE'],
-          target: docAUrl
+          target: docAUrl,
+          spaceUrl: alice.space1.url
         })
         const response = await invokeCapabilityAt({
           url: docBUrl,
@@ -255,7 +269,8 @@ export const invocationTargetApi: Suite<State> = {
         const zcap = await alice.was.grant({
           to: bob.did,
           actions: ['GET'],
-          target: docAUrl
+          target: docAUrl,
+          spaceUrl: alice.space1.url
         })
         const response = await invokeCapabilityAt({
           url: collectionUrl,
@@ -279,7 +294,8 @@ export const invocationTargetApi: Suite<State> = {
         const zcap = await alice.was.grant({
           to: bob.did,
           actions: ['GET'],
-          target: docAUrl
+          target: docAUrl,
+          spaceUrl: alice.space1.url
         })
         const response = await invokeCapabilityAt({
           url: docCUrl,

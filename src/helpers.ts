@@ -3,7 +3,11 @@
  */
 import { ZcapClient } from '@interop/ezcap'
 import { WasClient } from '@interop/was-client'
-import { spacesUrl } from '@interop/was-client/paths'
+import {
+  spaceMetaUrl,
+  spacesRepositoryUrl,
+  spaceUrlById
+} from '@interop/was-client/paths'
 import type { Space } from '@interop/was-client'
 import { decodeSecretKeySeed } from '@digitalcredentials/bnid'
 import { EddsaJcs2022 } from '@interop/ed25519-signature/eddsa-jcs-2022'
@@ -48,8 +52,8 @@ export function zcapClient({ signer }: { signer: ISigner }): ZcapClient {
 
 /**
  * Builds a high-level WAS client wrapping a ZcapClient for the given signer.
- * The `serverUrl` is the server's base URL, the parent of its Spaces
- * Repository; the client itself takes the `/spaces/` URL as its `serverUrl`.
+ * The `serverUrl` is the server's base server URL, passed to the client as
+ * `baseServerUrl`.
  *
  * @param options {object}
  * @param options.serverUrl {string}
@@ -64,7 +68,7 @@ export function wasClient({
   signer: ISigner
 }): WasClient {
   return new WasClient({
-    serverUrl: spacesUrl({ baseUrl: serverUrl }),
+    baseServerUrl: serverUrl,
     zcapClient: zcapClient({ signer })
   })
 }
@@ -116,6 +120,30 @@ export async function buildZcapClients({
 }
 
 /**
+ * `POST`s a Space description to the Spaces Repository with an onboarding
+ * token: the unsigned, `Authorization: Bearer` wire form a server that gates
+ * provisioning accepts. Returns the raw response for the caller to interpret.
+ */
+async function postSpaceWithToken({
+  serverUrl,
+  onboardingToken,
+  spaceDescription
+}: {
+  serverUrl: string
+  onboardingToken: string
+  spaceDescription: object
+}): Promise<Response> {
+  return fetch(spacesRepositoryUrl({ baseServerUrl: serverUrl }), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${onboardingToken}`
+    },
+    body: JSON.stringify(spaceDescription)
+  })
+}
+
+/**
  * Creates a space on the server using an onboarding token (if configured) or
  * the WAS client. Returns a normalized response object for consistent
  * assertion.
@@ -144,23 +172,20 @@ export async function createSpace({
   rootClient: ZcapClient
 }): Promise<{ status: number; headers: Headers; data: any }> {
   if (onboardingToken) {
-    const response = await fetch(new URL('/spaces/', serverUrl), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${onboardingToken}`
-      },
-      body: JSON.stringify(spaceDescription)
+    const response = await postSpaceWithToken({
+      serverUrl,
+      onboardingToken,
+      spaceDescription
     })
     const data = await response.json()
     return { status: response.status, headers: response.headers, data }
   }
   const was = new WasClient({
-    serverUrl: spacesUrl({ baseUrl: serverUrl }),
+    baseServerUrl: serverUrl,
     zcapClient: rootClient
   })
   const response = await was.request({
-    path: '/spaces/',
+    url: spacesRepositoryUrl({ baseServerUrl: serverUrl }),
     method: 'POST',
     json: spaceDescription
   })
@@ -205,7 +230,9 @@ export async function createSpaceByPut({
   rootClient: ZcapClient
   headers?: Record<string, string>
 }): Promise<{ status: number; headers: Headers; data: any }> {
-  const metaUrl = new URL(`/space/${spaceId}/meta`, serverUrl).toString()
+  const metaUrl = spaceMetaUrl({
+    spaceUrl: spaceUrlById({ baseServerUrl: serverUrl, spaceId })
+  })
   if (onboardingToken) {
     const response = await fetch(metaUrl, {
       method: 'PUT',
@@ -264,13 +291,10 @@ export async function provisionSpace({
     return was.createSpace({ name })
   }
   const id = uuidv4()
-  const response = await fetch(new URL('/spaces/', serverUrl), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${onboardingToken}`
-    },
-    body: JSON.stringify({ id, name, controller: was.controllerDid })
+  const response = await postSpaceWithToken({
+    serverUrl,
+    onboardingToken,
+    spaceDescription: { id, name, controller: was.controllerDid }
   })
   if (response.status !== 201) {
     throw new Error(

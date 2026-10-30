@@ -15,7 +15,7 @@
  * exist (an absent Space still carries the header, and the no-slash-to-slash
  * redirect reads no ids).
  */
-import { spacesUrl } from '@interop/was-client/paths'
+import { spacesRepositoryUrl } from '@interop/was-client/paths'
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
 
@@ -176,7 +176,7 @@ export const serviceDescriptionApi: Suite<State> = {
     // The spec's own discovery starts from any PWS URL the client holds. The
     // Spaces Repository URL is one; the server's root need not be (a wallet
     // may serve its own app there).
-    const probeUrl = spacesUrl({ baseUrl: ctx.serverUrl })
+    const probeUrl = spacesRepositoryUrl({ baseServerUrl: ctx.serverUrl })
     const response = await fetch(probeUrl)
     const serviceUrl = findServiceLink(response, probeUrl)
     assertAbsoluteUrl(serviceUrl, 'the discovered service description URL')
@@ -189,7 +189,7 @@ export const serviceDescriptionApi: Suite<State> = {
       name: 'the service description is discovered via the Link rel="service" header, not a fixed path',
       specRefs: ['https://w3id.org/pws#discovering-the-service-description'],
       run: async (ctx, state) => {
-        const probeUrl = spacesUrl({ baseUrl: ctx.serverUrl })
+        const probeUrl = spacesRepositoryUrl({ baseServerUrl: ctx.serverUrl })
         const response = await fetch(probeUrl)
         const target = findServiceLink(response, probeUrl)
         assert.equal(

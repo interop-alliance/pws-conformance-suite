@@ -9,7 +9,7 @@
  * serves the document elsewhere is read correctly.
  */
 
-import { spacesUrl } from '@interop/was-client/paths'
+import { spacesRepositoryUrl } from '@interop/was-client/paths'
 
 /** The WAS core specification's self-declared persistent identifier. */
 export const PWS_SPEC_IDENTIFIER = 'https://w3id.org/pws'
@@ -57,7 +57,7 @@ function serviceLinkOf(response: Response, base: string): string | undefined {
 export async function fetchServiceDescription(
   serverUrl: string
 ): Promise<any | undefined> {
-  const probeUrl = spacesUrl({ baseUrl: serverUrl })
+  const probeUrl = spacesRepositoryUrl({ baseServerUrl: serverUrl })
   const probeResponse = await fetch(probeUrl)
   const serviceUrl = serviceLinkOf(probeResponse, probeUrl)
   if (serviceUrl === undefined) {

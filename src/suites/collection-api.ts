@@ -4,6 +4,7 @@
 /**
  * WAS conformance tests -- Collections API.
  */
+import { spaceUrlById } from '@interop/was-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { IZcap } from '@interop/data-integrity-core/zcap'
@@ -138,7 +139,11 @@ export const collectionApi: Suite<State> = {
 
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -692,7 +697,8 @@ export const collectionApi: Suite<State> = {
         const zcap = await alice.was.grant({
           to: aliceDelegatedApp.did,
           actions: ['GET'],
-          target: listTarget
+          target: listTarget,
+          spaceUrl: alice.space1.url
         })
 
         // The delegate follows `next` across all pages using that SAME

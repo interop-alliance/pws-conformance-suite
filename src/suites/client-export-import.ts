@@ -8,6 +8,7 @@
  * server: export a populated space, then import the archive into a fresh one.
  */
 import type { Space } from '@interop/was-client'
+import { resourceUrl } from '@interop/was-client/paths'
 
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
@@ -59,7 +60,6 @@ export const clientExportImport: Suite<State> = {
       name: 'exports a space to a tar archive and imports it into another',
       specRefs: ['https://w3id.org/pws#data-portability'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { newSpace, alice } = state
         const source = await newSpace('Export Source')
         const collection = await source.createCollection({
@@ -71,7 +71,7 @@ export const clientExportImport: Suite<State> = {
         // Make the collection world-readable so we can verify the policy survives
         // the export/import round-trip.
         await alice.was.request({
-          path: `/space/${source.id}/notes/policy`,
+          url: `${source.url}notes/policy`,
           method: 'PUT',
           json: { type: 'PublicCanRead' }
         })
@@ -92,7 +92,11 @@ export const clientExportImport: Suite<State> = {
         // The PublicCanRead policy round-tripped: an anonymous GET of the imported
         // resource in the target space succeeds.
         const anonResponse = await fetch(
-          new URL(`/space/${target.id}/notes/first`, serverUrl)
+          resourceUrl({
+            spaceUrl: target.url,
+            collectionId: 'notes',
+            resourceId: 'first'
+          })
         )
         assert.equal(anonResponse.status, 200)
         const anonBody = (await anonResponse.json()) as { body: string }

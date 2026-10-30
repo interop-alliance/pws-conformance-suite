@@ -1,5 +1,14 @@
 # @interop/pws-conformance-suite Changelog
 
+## 0.35.0 - TBD
+
+### Changed
+
+- **BREAKING**: requires `@interop/was-client` 0.100.1 or later (peer range
+  `>=0.100.1 <1.0.0`). The server URL is the client's `baseServerUrl`, grants
+  below a Space name its `spaceUrl`, and Space handles open with
+  `spaceAt(space.url)`. No case id or assertion changed.
+
 ## 0.34.0 - 2026-10-26
 
 ### Changed

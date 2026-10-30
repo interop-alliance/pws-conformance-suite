@@ -24,12 +24,12 @@
 
 ## Background
 
-This suite black-box tests any running Portable Web Spaces server
-implementation over HTTP: spaces, collections, resources, access-control
-policies, change queries, encryption descriptors, ZCap delegation, and space
-export/import. It never inspects server internals -- point it at a server URL
-(plus an optional onboarding token, if the server gates provisioning) and it
-reports per-test pass/fail results against the
+This suite black-box tests any running Portable Web Spaces server implementation
+over HTTP: spaces, collections, resources, access-control policies, change
+queries, encryption descriptors, ZCap delegation, and space export/import. It
+never inspects server internals -- point it at a server URL (plus an optional
+onboarding token, if the server gates provisioning) and it reports per-test
+pass/fail results against the
 [PWS spec](https://w3c-ccg.github.io/portable-web-spaces-spec/).
 
 ### The server URL must be byte-identical everywhere

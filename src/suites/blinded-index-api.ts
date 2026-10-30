@@ -33,7 +33,6 @@ import {
 import type { Suite } from '../harness/types.js'
 
 import { ConflictError, WasClient } from '@interop/was-client'
-import { spacesUrl } from '@interop/was-client/paths'
 import type { Collection, FindPage, Space } from '@interop/was-client'
 import {
   createEdvEncryption,
@@ -135,7 +134,7 @@ async function encryptedClient({ serverUrl }: { serverUrl: string }): Promise<{
   })
   return {
     was: WasClient.fromSigner({
-      serverUrl: spacesUrl({ baseUrl: serverUrl }),
+      baseServerUrl: serverUrl,
       signer: keyPair.didKeySigner(),
       encryption
     }),
@@ -301,7 +300,7 @@ export const blindedIndexApi: Suite<State> = {
             recipients: [ownerRecipient({ keyAgreementKey })],
             blindedIndex: true
           })
-          const collection = was.space(space.id).collection(id)
+          const collection = was.spaceAt(space.url).collection(id)
           await collection.declareIndex({
             attribute,
             ...(unique && { unique })

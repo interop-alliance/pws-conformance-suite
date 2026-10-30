@@ -67,7 +67,7 @@ export const clientDelegation: Suite<State> = {
       run: async (ctx, state) => {
         const { newSpace, bob } = state
         const space = await newSpace('Private')
-        const seenByBob = await bob.was.space(space.id).describe()
+        const seenByBob = await bob.was.spaceAt(space.url).describe()
         assert.equal(seenByBob, null)
       }
     },
@@ -97,14 +97,14 @@ export const clientDelegation: Suite<State> = {
         'https://w3id.org/pws#read-resource-operation'
       ],
       run: async (ctx, state) => {
-        const { newSpace, alice, bob } = state
+        const { newSpace, bob } = state
         const space = await newSpace('Doc Space')
         const collection = await space.createCollection({ id: 'docs' })
         const added = await collection.add({ secret: 'value' })
 
         // Lowercase action input is normalized to uppercase in the signed zcap,
         // so it still validates against the server (which expects 'GET').
-        const zcap = await alice.was.grant({
+        const zcap = await collection.grant({
           to: bob.did,
           actions: ['get'],
           target: added.url
