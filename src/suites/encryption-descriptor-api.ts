@@ -122,6 +122,38 @@ export const encryptionDescriptorApi: Suite<State> = {
       }
     },
     {
+      id: 'encryption.persist-echo-put-create',
+      name: '[root] persists and echoes the descriptor on a create by PUT /meta',
+      specRefs: [
+        'https://w3id.org/pws#creation-only-members',
+        'https://w3id.org/pws#collection-metadata-data-model'
+      ],
+      run: async (ctx, state) => {
+        const { serverUrl } = ctx
+        const { alice } = state
+        // A `PUT` of the Metadata object that finds no Collection under the
+        // id is a creating write, so it may declare the creation-only
+        // descriptor.
+        const metaUrl = new URL(
+          `/space/${alice.space1.id}/put-vault/meta`,
+          serverUrl
+        ).toString()
+        const response = await alice.rootClient.request({
+          url: metaUrl,
+          method: 'PUT',
+          action: 'PUT',
+          json: { id: 'put-vault', encryption: { scheme: 'edv' } }
+        })
+        assert.equal(response.status, 201)
+
+        const read = await alice.rootClient.request({
+          url: metaUrl,
+          method: 'GET'
+        })
+        assert.deepStrictEqual(read.data.encryption, { scheme: 'edv' })
+      }
+    },
+    {
       id: 'encryption.delegated-discovers-descriptor',
       name: 'a delegated consumer discovers the descriptor by reading the Metadata object',
       specRefs: ['https://w3id.org/pws#collection-metadata-data-model'],
@@ -300,6 +332,70 @@ export const encryptionDescriptorApi: Suite<State> = {
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, { scheme: 'edv' })
+      }
+    },
+    {
+      id: 'encryption.late-declaration-immutable',
+      name: '[root] an update cannot add a descriptor to an existing Collection that lacks one (409 encryption-immutable)',
+      specRefs: [
+        'https://w3id.org/pws#encryption-immutable',
+        'https://w3id.org/pws#creation-only-members'
+      ],
+      run: async (ctx, state) => {
+        const { serverUrl } = ctx
+        const { alice, createCollection } = state
+        // The descriptor is creation-only. A Collection that exists without
+        // one never becomes encrypted in place, so an update that adds it
+        // MUST be refused and leave the Metadata object as it was.
+        const created = await createCollection({
+          id: 'born-plain',
+          name: 'Born Plain'
+        })
+        assert.equal(created.status, 201)
+        const metaUrl = new URL(
+          `/space/${alice.space1.id}/born-plain/meta`,
+          serverUrl
+        ).toString()
+        const before = await alice.rootClient.request({
+          url: metaUrl,
+          method: 'GET'
+        })
+        const etagBefore = before.headers.get('etag')
+        assert.ok(etagBefore, 'expected the Metadata object to carry an ETag')
+        assert.equal(before.data.encryption, undefined)
+
+        let expectedError: any
+        try {
+          await alice.rootClient.request({
+            url: metaUrl,
+            method: 'PUT',
+            action: 'PUT',
+            json: {
+              id: 'born-plain',
+              name: 'Born Plain',
+              encryption: { scheme: 'edv' }
+            }
+          })
+        } catch (err) {
+          expectedError = err
+        }
+        assert.ok(
+          expectedError,
+          'expected the late descriptor declaration to be rejected'
+        )
+        assert.equal(expectedError.response.status, 409)
+        assert.equal(
+          expectedError.data.type,
+          'https://w3id.org/pws#encryption-immutable'
+        )
+
+        // The Metadata object is unchanged: no descriptor, same ETag.
+        const after = await alice.rootClient.request({
+          url: metaUrl,
+          method: 'GET'
+        })
+        assert.equal(after.data.encryption, undefined)
+        assert.equal(after.headers.get('etag'), etagBefore)
       }
     },
     {

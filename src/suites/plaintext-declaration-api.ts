@@ -214,7 +214,7 @@ export const plaintextDeclarationApi: Suite<State> = {
     },
     {
       id: 'plaintext.both-on-update-400',
-      name: '[root] an update whose result carries both plaintext and encryption is invalid-request-body (400), in either direction',
+      name: '[root] an update adding plaintext to an encrypted Collection is invalid-request-body (400), even an empty plaintext',
       specRefs: [
         'https://w3id.org/pws#collection-metadata-data-model',
         'https://w3id.org/pws#invalid-request-body'
@@ -249,8 +249,25 @@ export const plaintextDeclarationApi: Suite<State> = {
         const encrypted = await readCollection('enc-first')
         assert.deepStrictEqual(encrypted.data.encryption, { scheme: 'edv' })
         assert.equal(encrypted.data.plaintext, undefined)
-
-        // Adding `encryption` to a Collection carrying `plaintext`.
+      }
+    },
+    {
+      id: 'plaintext.add-encryption-refused',
+      name: '[root] an update adding encryption to a plaintext-declared Collection is refused (409 encryption-immutable or 400 invalid-request-body)',
+      specRefs: [
+        'https://w3id.org/pws#creation-only-members',
+        'https://w3id.org/pws#encryption-immutable',
+        'https://w3id.org/pws#collection-metadata-data-model',
+        'https://w3id.org/pws#invalid-request-body'
+      ],
+      run: async (ctx, state) => {
+        const { createCollection, putCollection, readCollection } = state
+        // The update omits `plaintext`, which leaves the stored `{}` in place,
+        // so its result would carry both members (`invalid-request-body`,
+        // 400). It is also a late declaration of the creation-only
+        // `encryption` (`encryption-immutable`, 409). The spec sets no order
+        // between the two checks, so either refusal is accepted. Either way
+        // the stored object must survive intact.
         await createCollection({ id: 'plain-first', plaintext: {} })
         const err = await rejection(
           putCollection('plain-first', {
@@ -259,8 +276,17 @@ export const plaintextDeclarationApi: Suite<State> = {
           }),
           'expected adding encryption to a plaintext-declared Collection to be rejected'
         )
-        assert.equal(err.response.status, 400)
-        assert.equal(err.data.type, 'https://w3id.org/pws#invalid-request-body')
+        const { status } = err.response
+        assert.ok(
+          status === 409 || status === 400,
+          `expected 409 or 400 for the late encryption declaration, got ${status}`
+        )
+        assert.equal(
+          err.data.type,
+          status === 409
+            ? 'https://w3id.org/pws#encryption-immutable'
+            : 'https://w3id.org/pws#invalid-request-body'
+        )
         const plain = await readCollection('plain-first')
         assert.deepStrictEqual(plain.data.plaintext, {})
         assert.equal(plain.data.encryption, undefined)

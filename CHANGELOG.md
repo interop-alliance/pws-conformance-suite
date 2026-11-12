@@ -1,5 +1,28 @@
 # @interop/pws-conformance-suite Changelog
 
+## 0.37.0 - TBD
+
+### Added
+
+- `encryption.late-declaration-immutable`: an Update Collection that adds
+  `encryption` to an existing Collection without one is `encryption-immutable`
+  (409), and the Collection Metadata object keeps no descriptor and the same
+  `ETag`.
+- `encryption.persist-echo-put-create`: a create by `PUT .../meta` declares
+  `encryption` and serves it back.
+- `plaintext.add-encryption-refused` (optional suite): an update adding
+  `encryption` to a Collection declared with `plaintext: {}` is refused, and the
+  stored `plaintext` stays. Either `encryption-immutable` (409) or
+  `invalid-request-body` (400) is accepted, since the spec sets no order between
+  the two checks.
+
+### Changed
+
+- `plaintext.both-on-update-400` covers one direction only, adding `plaintext`
+  to an encrypted Collection. Adding `encryption` to a `plaintext` Collection
+  moved to `plaintext.add-encryption-refused`, since `encryption` is
+  creation-only.
+
 ## 0.36.0 - 2026-10-30
 
 ### Changed
