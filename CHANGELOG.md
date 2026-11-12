@@ -1,6 +1,6 @@
 # @interop/pws-conformance-suite Changelog
 
-## 0.37.0 - TBD
+## 0.37.0 - 2026-11-12
 
 ### Added
 
