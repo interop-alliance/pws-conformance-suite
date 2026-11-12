@@ -15,7 +15,11 @@
  * profile under `specs` in the service description is itself the claim that
  * they are served. So setup() reads that document and each test skips when the
  * server lists no entry under the profile's identifier; where it does, the
- * behaviors below run at their MUST-level tier.
+ * behaviors below run at their MUST-level tier. The one case that stores a
+ * chunk under an `edv` descriptor also needs the OPTIONAL client-side
+ * encryption feature (the PWS `encryption` token), and the one that reads the
+ * `changes` feed needs the `changes-query` token. Each skips without its
+ * token.
  *
  * A chunk is addressed at
  * `/space/{space}/{collection}/{resource}/chunks/{index}` in member form and
@@ -24,13 +28,21 @@
  * never parses it (framing and any client-side encryption are the client's
  * concern). The parent Resource MUST already exist before any chunk is written.
  */
-import { spaceUrlById } from '@interop/pws-client/paths'
+import {
+  collectionQueryUrl,
+  resourceChunksUrl,
+  resourceChunkUrl,
+  resourceUrl as resourceUrlOf,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import type { IZcap } from '@interop/data-integrity-core/zcap'
+import { capabilityActionFor } from '../helpers.js'
 import assert from '../harness/assert.js'
 import {
   ENCRYPTED_COLLECTIONS_IDENTIFIER,
+  serviceFeatures,
   servesSpec
 } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
@@ -39,6 +51,10 @@ interface State {
   alice: any
   bob: any
   chunkedSupported: boolean
+  /** Whether the server advertises the PWS `encryption` features token. */
+  encryptionSupported: boolean
+  /** Whether the server advertises the PWS `changes-query` features token. */
+  changesSupported: boolean
   /** Absolute URL of a chunk member (no trailing slash). */
   chunkUrl: (options: {
     collectionId: string
@@ -165,10 +181,17 @@ export const chunksApi: Suite<State> = {
       resourceId: string
       index: number | string
     }): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/${resourceId}/chunks/${index}`,
-        ctx.serverUrl
-      ).toString()
+      // The non-canonical index probes send a raw `{index}` such as '01',
+      // which the builder refuses. Only those probes use a string index.
+      if (typeof index === 'number') {
+        return resourceChunkUrl({
+          spaceUrl: alice.space1.url,
+          collectionId,
+          resourceId,
+          chunkIndex: index
+        })
+      }
+      return `${resourceUrl({ collectionId, resourceId })}/chunks/${index}`
     }
 
     function chunksListUrl({
@@ -178,10 +201,11 @@ export const chunksApi: Suite<State> = {
       collectionId: string
       resourceId: string
     }): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/${resourceId}/chunks/`,
-        ctx.serverUrl
-      ).toString()
+      return resourceChunksUrl({
+        spaceUrl: alice.space1.url,
+        collectionId,
+        resourceId
+      })
     }
 
     function resourceUrl({
@@ -191,27 +215,12 @@ export const chunksApi: Suite<State> = {
       collectionId: string
       resourceId: string
     }): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/${resourceId}`,
-        ctx.serverUrl
-      ).toString()
+      return resourceUrlOf({
+        spaceUrl: alice.space1.url,
+        collectionId,
+        resourceId
+      })
     }
-
-    // A plaintext Collection for the bulk of the round-trip cases.
-    await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
-      method: 'POST',
-      action: 'POST',
-      json: { id: 'data', name: 'Chunked Data' }
-    })
-    // An encrypted (`edv`) Collection for the "chunk bytes are never parsed,
-    // even under an encryption descriptor" rule.
-    await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
-      method: 'POST',
-      action: 'POST',
-      json: { id: 'vault', name: 'Vault', encryption: { scheme: 'edv' } }
-    })
 
     // Listing the Encrypted Collections profile is the claim that the chunk
     // endpoints are served; a server that lists no entry serves none.
@@ -219,6 +228,29 @@ export const chunksApi: Suite<State> = {
       serverUrl: ctx.serverUrl,
       specIdentifier: ENCRYPTED_COLLECTIONS_IDENTIFIER
     })
+    const features = await serviceFeatures({ serverUrl: ctx.serverUrl })
+    const encryptionSupported = features.includes('encryption')
+    const changesSupported = features.includes('changes-query')
+
+    // A plaintext Collection for the bulk of the round-trip cases.
+    await alice.rootClient.request({
+      url: alice.space1.url,
+      method: 'POST',
+      action: 'POST',
+      json: { id: 'data', name: 'Chunked Data' }
+    })
+    // An encrypted (`edv`) Collection for the "chunk bytes are never parsed,
+    // even under an encryption descriptor" rule. A server without the
+    // encryption feature may refuse the descriptor, so it is only declared
+    // where the feature is advertised.
+    if (encryptionSupported) {
+      await alice.rootClient.request({
+        url: alice.space1.url,
+        method: 'POST',
+        action: 'POST',
+        json: { id: 'vault', name: 'Vault', encryption: { scheme: 'edv' } }
+      })
+    }
 
     async function createParent(resourceId: string): Promise<void> {
       await alice.rootClient.request({
@@ -233,6 +265,8 @@ export const chunksApi: Suite<State> = {
       alice,
       bob,
       chunkedSupported,
+      encryptionSupported,
+      changesSupported,
       chunkUrl,
       chunksListUrl,
       resourceUrl,
@@ -244,7 +278,7 @@ export const chunksApi: Suite<State> = {
     const { alice } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'DELETE'
       })
     } catch {
@@ -300,7 +334,8 @@ export const chunksApi: Suite<State> = {
         // Head: the same payload headers, no body.
         const headResponse = await alice.rootClient.request({
           url,
-          method: 'HEAD'
+          method: 'HEAD',
+          action: capabilityActionFor('HEAD')
         })
         assert.equal(headResponse.status, 200)
         assert.match(
@@ -394,6 +429,9 @@ export const chunksApi: Suite<State> = {
         const { alice, chunkUrl, resourceUrl, chunkedSupported } = state
         if (!chunkedSupported) {
           ctx.skip('the server lists no Encrypted Collections entry')
+        }
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
         }
         // The parent Resource lives in the encrypted `vault` Collection, so its
         // own content MUST be a conforming EDV envelope...
@@ -574,7 +612,8 @@ export const chunksApi: Suite<State> = {
           assert.equal(getResponse.headers.get('etag'), chunk.etag)
           const headResponse = await alice.rootClient.request({
             url,
-            method: 'HEAD'
+            method: 'HEAD',
+            action: capabilityActionFor('HEAD')
           })
           assert.equal(headResponse.headers.get('etag'), chunk.etag)
         }
@@ -692,11 +731,14 @@ export const chunksApi: Suite<State> = {
         if (!chunkedSupported) {
           ctx.skip('the server lists no Encrypted Collections entry')
         }
+        if (!state.changesSupported) {
+          ctx.skip('the server does not advertise changes-query')
+        }
         const resourceId = 'feed-manifest'
-        const queryUrl = new URL(
-          `/space/${alice.space1.id}/data/query`,
-          ctx.serverUrl
-        ).toString()
+        const queryUrl = collectionQueryUrl({
+          spaceUrl: alice.space1.url,
+          collectionId: 'data'
+        })
 
         // Seed the parent manifest, then drain the feed and keep a checkpoint.
         await alice.rootClient.request({
@@ -819,10 +861,6 @@ export const chunksApi: Suite<State> = {
           response.status === 400 || response.status === 404,
           `expected the sibling-chunk invocation to be rejected with ` +
             `400 or 404, got ${response.status}`
-        )
-        assert.match(
-          response.headers.get('content-type') ?? '',
-          /application\/problem\+json/
         )
 
         // The operation MUST NOT have been performed: chunk 0 was not written.

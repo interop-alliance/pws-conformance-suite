@@ -33,6 +33,7 @@
  * limitation rather than a server property, so it is out of scope here.
  */
 import { ZcapClient } from '@interop/ezcap'
+import { resourceUrl, spaceUrlById } from '@interop/pws-client/paths'
 import { Ed25519Signature2020 } from '@interop/ed25519-signature'
 import type { ISigner } from '@interop/data-integrity-core'
 
@@ -44,7 +45,7 @@ interface State {
   aliceDelegatedApp: any
   bob: any
   docUrl: string
-  spaceId: string
+  spaceUrl: string
 }
 
 /**
@@ -86,6 +87,7 @@ export const delegationCryptosuitesApi: Suite<State> = {
     const aliceDelegatedApp: any = { ...ctx.actors.aliceDelegatedApp }
     const bob: any = { ...ctx.actors.bob }
     const spaceId = ctx.generateId()
+    const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
     const resourceId = ctx.generateId()
 
     await ctx.createSpace({
@@ -97,15 +99,16 @@ export const delegationCryptosuitesApi: Suite<State> = {
       rootClient: alice.rootClient
     })
     await alice.rootClient.request({
-      url: new URL(`/space/${spaceId}/`, ctx.serverUrl).toString(),
+      url: spaceUrl,
       method: 'POST',
       action: 'POST',
       json: { id: 'credentials', name: 'Verifiable Credentials' }
     })
-    const docUrl = new URL(
-      `/space/${spaceId}/credentials/${resourceId}`,
-      ctx.serverUrl
-    ).toString()
+    const docUrl = resourceUrl({
+      spaceUrl,
+      collectionId: 'credentials',
+      resourceId
+    })
     await alice.rootClient.request({
       url: docUrl,
       method: 'PUT',
@@ -113,13 +116,13 @@ export const delegationCryptosuitesApi: Suite<State> = {
       json: { id: resourceId, hello: 'world' }
     })
 
-    return { alice, aliceDelegatedApp, bob, docUrl, spaceId }
+    return { alice, aliceDelegatedApp, bob, docUrl, spaceUrl }
   },
 
   teardown: async (ctx, state) => {
     try {
       await state.alice.rootClient.request({
-        url: new URL(`/space/${state.spaceId}/`, ctx.serverUrl).toString(),
+        url: state.spaceUrl,
         method: 'DELETE'
       })
     } catch {

@@ -42,7 +42,7 @@
   "sideEffects": false,
   "dependencies": {
     "@digitalcredentials/bnid": "^5.0.0",
-    "@interop/data-integrity-core": "^8.9.0",
+    "@interop/data-integrity-core": "^8.11.0",
     "@interop/ed25519-signature": "^7.2.5",
     "@interop/ed25519-verification-key": "^8.2.2",
     "@interop/ezcap": "^7.5.4",
@@ -53,11 +53,11 @@
     "uuid": "^14.0.0"
   },
   "peerDependencies": {
-    "@interop/pws-client": ">=0.104.0 <1.0.0"
+    "@interop/pws-client": ">=0.106.0 <1.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "@interop/pws-client": "^0.104.0",
+    "@interop/pws-client": "^0.108.0",
     "@playwright/test": "^1.60.0",
     "@types/node": "^26.0.1",
     "@vitest/coverage-v8": "^4.1.7",

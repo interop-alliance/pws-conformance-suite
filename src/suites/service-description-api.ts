@@ -15,7 +15,7 @@
  * exist (an absent Space still carries the header, and the no-slash-to-slash
  * redirect reads no ids).
  */
-import { spacesRepositoryUrl } from '@interop/pws-client/paths'
+import { spacesRepositoryUrl, spaceUrlById } from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
 
@@ -154,9 +154,15 @@ function assertArrayOfStrings(value: unknown, label: string): void {
 
 const VERSION_ENTRY_REGEX = /^\d+\.\d+$/
 
+/** The baseline authorization profile's self-declared identifier. */
+const AUTHZ_PROFILE_IDENTIFIER = 'https://w3id.org/pws/authz-profile'
+
 /**
- * The service description entry for this specification, in the shape
- * "Service Description Data Model" defines.
+ * A service description version entry, with the members this suite reads.
+ * `spaces` and `features` belong to the core spec's entry ("Service
+ * Description Data Model"). `signatureAlgorithms` and `zcapCryptosuites`
+ * belong to the authorization profile's entry (its "Service Description
+ * Entry" section).
  */
 interface PwsVersionEntry {
   version: string
@@ -228,10 +234,10 @@ export const serviceDescriptionApi: Suite<State> = {
       name: 'the Link header is present on an anonymous read of an absent Space (error response)',
       specRefs: ['https://w3id.org/pws#discovering-the-service-description'],
       run: async (ctx, state) => {
-        const absentSpaceUrl = new URL(
-          `/space/${ctx.generateId()}/`,
-          ctx.serverUrl
-        ).toString()
+        const absentSpaceUrl = spaceUrlById({
+          baseServerUrl: ctx.serverUrl,
+          spaceId: ctx.generateId()
+        })
         const response = await fetch(absentSpaceUrl)
         assert.notEqual(response.status, 200)
         assertDiscoverable({
@@ -243,15 +249,27 @@ export const serviceDescriptionApi: Suite<State> = {
     },
     {
       id: 'service-description.link-on-redirect',
-      name: 'the Link header is present on a 308 slash-variant redirect',
-      specRefs: ['https://w3id.org/pws#discovering-the-service-description'],
+      name: 'the Link header is present on a 308 slash-variant redirect, when the server redirects',
+      specRefs: [
+        'https://w3id.org/pws#discovering-the-service-description',
+        'https://w3id.org/pws#reading-this-document'
+      ],
       run: async (ctx, state) => {
-        const noSlashUrl = new URL(
-          `/space/${ctx.generateId()}`,
-          ctx.serverUrl
-        ).toString()
+        // The non-canonical form is a Space URL without its trailing slash.
+        const noSlashUrl = spaceUrlById({
+          baseServerUrl: ctx.serverUrl,
+          spaceId: ctx.generateId()
+        }).slice(0, -1)
         const response = await fetch(noSlashUrl, { redirect: 'manual' })
-        assert.equal(response.status, 308)
+        // The 308 to the canonical form is a SHOULD (spec "Reading This
+        // Document"). The Link requirement applies to the redirect only when
+        // the server sends one.
+        if (response.status !== 308) {
+          ctx.skip(
+            'the canonical-form 308 is a SHOULD; this server answered ' +
+              `${response.status} instead`
+          )
+        }
         assertDiscoverable({
           response,
           base: ctx.serverUrl,
@@ -264,10 +282,10 @@ export const serviceDescriptionApi: Suite<State> = {
       name: 'the Link header is present on a CORS preflight (OPTIONS)',
       specRefs: ['https://w3id.org/pws#discovering-the-service-description'],
       run: async (ctx, state) => {
-        const targetUrl = new URL(
-          `/space/${ctx.generateId()}/`,
-          ctx.serverUrl
-        ).toString()
+        const targetUrl = spaceUrlById({
+          baseServerUrl: ctx.serverUrl,
+          spaceId: ctx.generateId()
+        })
         const response = await fetch(targetUrl, {
           method: 'OPTIONS',
           headers: {
@@ -324,7 +342,7 @@ export const serviceDescriptionApi: Suite<State> = {
     },
     {
       id: 'service-description.pws-version-entry',
-      name: 'the https://w3id.org/pws entry for version 0.5 has well-formed optional members',
+      name: 'the https://w3id.org/pws entry for version 0.5, and any authz-profile entry, have well-formed optional members',
       specRefs: ['https://w3id.org/pws#service-description-data-model'],
       run: async (ctx, state) => {
         const response = await fetch(state.serviceUrl)
@@ -344,17 +362,27 @@ export const serviceDescriptionApi: Suite<State> = {
         if (entry!.features !== undefined) {
           assertArrayOfStrings(entry!.features, "the pws entry's features")
         }
-        if (entry!.signatureAlgorithms !== undefined) {
-          assertArrayOfStrings(
-            entry!.signatureAlgorithms,
-            "the pws entry's signatureAlgorithms"
-          )
-        }
-        if (entry!.zcapCryptosuites !== undefined) {
-          assertArrayOfStrings(
-            entry!.zcapCryptosuites,
-            "the pws entry's zcapCryptosuites"
-          )
+        // The accepted signature algorithms and delegation-proof cryptosuites
+        // live on the authorization profile's own entry, not the pws entry
+        // (spec "Service Description Data Model").
+        const authzEntries = document.specs[AUTHZ_PROFILE_IDENTIFIER] ?? []
+        assert.ok(
+          Array.isArray(authzEntries),
+          `expected specs["${AUTHZ_PROFILE_IDENTIFIER}"] to be an array`
+        )
+        for (const authzEntry of authzEntries) {
+          if (authzEntry.signatureAlgorithms !== undefined) {
+            assertArrayOfStrings(
+              authzEntry.signatureAlgorithms,
+              "the authz-profile entry's signatureAlgorithms"
+            )
+          }
+          if (authzEntry.zcapCryptosuites !== undefined) {
+            assertArrayOfStrings(
+              authzEntry.zcapCryptosuites,
+              "the authz-profile entry's zcapCryptosuites"
+            )
+          }
         }
       }
     },

@@ -4,7 +4,16 @@
 /**
  * WAS conformance tests -- Access-control policy (public-read fallback).
  */
+import {
+  collectionLinksetUrl,
+  collectionPolicyUrl,
+  resourcePolicyUrl,
+  resourceUrl as resourceUrlOf,
+  spacePolicyUrl,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
+import { serviceFeatures } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
 
 interface State {
@@ -27,17 +36,15 @@ export const policyApi: Suite<State> = {
     const collectionId = 'public-credentials'
     const resourceId = 'public-vc'
     const resourceUrl = () =>
-      new URL(
-        `/space/${alice.space1.id}/${collectionId}/${resourceId}`,
-        ctx.serverUrl
-      ).toString()
+      resourceUrlOf({ spaceUrl: alice.space1.url, collectionId, resourceId })
     const policyUrl = () =>
-      new URL(
-        `/space/${alice.space1.id}/${collectionId}/policy`,
-        ctx.serverUrl
-      ).toString()
+      collectionPolicyUrl({ spaceUrl: alice.space1.url, collectionId })
 
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -47,7 +54,7 @@ export const policyApi: Suite<State> = {
       rootClient: alice.rootClient
     })
     await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+      url: alice.space1.url,
       method: 'POST',
       json: { id: collectionId, name: 'Public Credentials' }
     })
@@ -64,7 +71,7 @@ export const policyApi: Suite<State> = {
     const { alice } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'DELETE'
       })
     } catch {
@@ -89,7 +96,7 @@ export const policyApi: Suite<State> = {
       specRefs: [
         'https://w3id.org/pws#access-control-policies',
         'https://w3id.org/pws/authz-profile#publiccanread',
-        'https://w3id.org/pws#policy-type-registry'
+        'https://w3id.org/pws/authz-profile#policy-type-registry'
       ],
       run: async (ctx, state) => {
         const { alice, policyUrl } = state
@@ -107,7 +114,7 @@ export const policyApi: Suite<State> = {
       specRefs: [
         'https://w3id.org/pws#access-control-policies',
         'https://w3id.org/pws/authz-profile#publiccanread',
-        'https://w3id.org/pws#policy-type-registry'
+        'https://w3id.org/pws/authz-profile#policy-type-registry'
       ],
       run: async (ctx, state) => {
         const { resourceUrl } = state
@@ -123,8 +130,9 @@ export const policyApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#access-control-policies'],
       run: async (ctx, state) => {
         const { bob, resourceUrl } = state
-        // Bob is not the Space controller, so his capability does not verify; the
-        // PublicCanRead policy grants the read.
+        // Bob is not the Space controller, so the root capability he invokes
+        // does not authorize the read. The policy is consulted as the
+        // fallback, and PublicCanRead grants the read.
         const response = await bob.rootClient.request({
           url: resourceUrl(),
           method: 'GET'
@@ -133,36 +141,53 @@ export const policyApi: Suite<State> = {
       }
     },
     {
-      id: 'policy.anonymous-write-rejected-401',
-      name: 'anonymous write is still rejected (401) on a public collection',
+      id: 'policy.anonymous-write-rejected-404',
+      name: 'anonymous write is still rejected (404, masked) on a public collection',
       specRefs: [
+        'https://w3id.org/pws#error-handling',
         'https://w3id.org/pws#access-control-policies',
         'https://w3id.org/pws/authz-profile#publiccanread',
-        'https://w3id.org/pws#policy-type-registry'
+        'https://w3id.org/pws/authz-profile#policy-type-registry'
       ],
       run: async (ctx, state) => {
         const { resourceUrl } = state
+        // PublicCanRead grants reads only. A request with no authorization
+        // that lacks privilege for an existing target is reported as
+        // not-found (404), the same as an absent target. The id keeps its
+        // historical `-401` suffix.
         const response = await fetch(resourceUrl(), {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ name: 'anon write' })
         })
-        assert.equal(response.status, 401)
+        assert.equal(response.status, 404)
+        // The refused write changed nothing.
+        const reread = await fetch(resourceUrl())
+        assert.equal(reread.status, 200)
+        const body = (await reread.json()) as { name: string }
+        assert.equal(body.name, 'A shared Verifiable Credential')
       }
     },
     {
       id: 'policy.linkset-advertises-policy',
       name: 'the collection linkset advertises the policy resource',
-      specRefs: ['https://w3id.org/pws#policy'],
+      specRefs: [
+        'https://w3id.org/pws#collection-linkset',
+        'https://w3id.org/pws#access-control-policies'
+      ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice, collectionId } = state
-        const response = await fetch(
-          new URL(
-            `/space/${alice.space1.id}/${collectionId}/linkset`,
-            serverUrl
-          )
-        )
+        // Linksets are an OPTIONAL extension, advertised by the `linksets`
+        // feature token.
+        const features = await serviceFeatures({ serverUrl: ctx.serverUrl })
+        if (!features.includes('linksets')) {
+          ctx.skip('the server does not advertise linksets')
+        }
+        const linksetUrl = collectionLinksetUrl({
+          spaceUrl: alice.space1.url,
+          collectionId
+        })
+        const response = await fetch(linksetUrl)
         assert.equal(response.status, 200)
         assert.match(
           response.headers.get('content-type')!,
@@ -171,9 +196,12 @@ export const policyApi: Suite<State> = {
         const body = (await response.json()) as {
           linkset: Array<Record<string, any>>
         }
+        // An `href` is a URL the server names, absolute or relative. It is
+        // compared after resolving it against the linkset's own URL.
+        const href = body.linkset[0]!['https://w3id.org/pws#policy'][0].href
         assert.equal(
-          body.linkset[0]!['https://w3id.org/pws#policy'][0].href,
-          `/space/${alice.space1.id}/${collectionId}/policy`
+          new URL(href, linksetUrl).toString(),
+          collectionPolicyUrl({ spaceUrl: alice.space1.url, collectionId })
         )
       }
     },
@@ -199,14 +227,17 @@ export const policyApi: Suite<State> = {
       specRefs: [
         'https://w3id.org/pws#access-control-policies',
         'https://w3id.org/pws/authz-profile#publiccanread',
-        'https://w3id.org/pws#policy-type-registry'
+        'https://w3id.org/pws/authz-profile#policy-type-registry'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
-        const { alice, resourceUrl } = state
+        const { alice, collectionId, resourceId, resourceUrl } = state
         // The collection policy was just removed, so this isolates resource-level.
         await alice.rootClient.request({
-          url: new URL(`${resourceUrl()}/policy`, serverUrl).toString(),
+          url: resourcePolicyUrl({
+            spaceUrl: alice.space1.url,
+            collectionId,
+            resourceId
+          }),
           method: 'PUT',
           json: { type: 'PublicCanRead' }
         })
@@ -215,7 +246,11 @@ export const policyApi: Suite<State> = {
 
         // Clean up so it does not mask the space-level inheritance check below.
         await alice.rootClient.request({
-          url: new URL(`${resourceUrl()}/policy`, serverUrl).toString(),
+          url: resourcePolicyUrl({
+            spaceUrl: alice.space1.url,
+            collectionId,
+            resourceId
+          }),
           method: 'DELETE'
         })
         assert.equal((await fetch(resourceUrl())).status, 404)
@@ -227,16 +262,16 @@ export const policyApi: Suite<State> = {
       specRefs: [
         'https://w3id.org/pws#access-control-policies',
         'https://w3id.org/pws/authz-profile#publiccanread',
-        'https://w3id.org/pws#policy-type-registry'
+        'https://w3id.org/pws/authz-profile#policy-type-registry'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice, collectionId } = state
         // A second resource with no policy of its own.
-        const inheritedUrl = new URL(
-          `/space/${alice.space1.id}/${collectionId}/inherited-vc`,
-          serverUrl
-        ).toString()
+        const inheritedUrl = resourceUrlOf({
+          spaceUrl: alice.space1.url,
+          collectionId,
+          resourceId: 'inherited-vc'
+        })
         await alice.rootClient.request({
           url: inheritedUrl,
           method: 'PUT',
@@ -246,10 +281,7 @@ export const policyApi: Suite<State> = {
 
         // A space-level PublicCanRead policy makes it readable by inheritance.
         await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/policy`,
-            serverUrl
-          ).toString(),
+          url: spacePolicyUrl({ spaceUrl: alice.space1.url }),
           method: 'PUT',
           json: { type: 'PublicCanRead' }
         })

@@ -20,13 +20,22 @@
  * of the Encrypted Collections entry in the service description. Rather than
  * mark the whole suite optional, setup() reads that document and each test
  * skips when the token is absent; once advertised, the behaviors below are
- * MUST-level and run at the required tier.
+ * MUST-level and run at the required tier. The only governed member is the
+ * `encryption` descriptor, and client-side encryption is itself OPTIONAL
+ * (the `encryption` token of the PWS entry). Every case that declares an
+ * `edv` descriptor, or relies on its envelope rule, also skips when that
+ * token is absent.
  *
  * The log is written and read through raw `fetch` over the low-level signing
  * primitive: the body is `text/jsonl` (not JSON, which the high-level clients
  * would parse), and a 304 or a problem response is read like any other.
  */
-import { spaceUrlById } from '@interop/pws-client/paths'
+import {
+  collectionLogUrl,
+  collectionMetaUrl,
+  collectionUrl as collectionUrlOf,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
 import assert from '../harness/assert.js'
@@ -34,14 +43,18 @@ import {
   ENCRYPTED_COLLECTIONS_IDENTIFIER,
   serviceFeatures
 } from '../harness/serviceDescription.js'
-import type { Suite } from '../harness/types.js'
+import type { Suite, TestContext } from '../harness/types.js'
 
 interface State {
   alice: any
   bob: any
   governedSupported: boolean
-  /** Absolute URL of a Collection (no trailing slash). */
+  /** Whether the server advertises the PWS `encryption` features token. */
+  encryptionSupported: boolean
+  /** Absolute URL of a Collection, in canonical (trailing-slash) form. */
   collectionUrl: (collectionId: string) => string
+  /** Absolute URL of a Collection's Metadata object. */
+  metaUrl: (collectionId: string) => string
   /** Absolute URL of a Collection's governing log sub-resource. */
   logUrl: (collectionId: string) => string
   /** Creates a fresh Collection (plaintext by default) and returns its id. */
@@ -153,8 +166,37 @@ function genesisLine(state: object): string {
 }
 
 /**
+ * Skips the running case unless the server advertises what it needs: always
+ * `governed-history-logs`, and `encryption` too when the case declares an
+ * `edv` descriptor or relies on its envelope rule.
+ *
+ * @param options {object}
+ * @param options.ctx {TestContext}
+ * @param options.state {State}
+ * @param options.encryption {boolean}   whether the case needs `encryption`
+ * @returns {void}
+ */
+function requireFeatures({
+  ctx,
+  state,
+  encryption
+}: {
+  ctx: TestContext
+  state: State
+  encryption: boolean
+}): void {
+  if (!state.governedSupported) {
+    ctx.skip('the server does not advertise governed-history-logs')
+  }
+  if (encryption && !state.encryptionSupported) {
+    ctx.skip('the server does not advertise encryption')
+  }
+}
+
+/**
  * Asserts a response is a problem document of the given status whose `type`
- * ends in the given registry anchor.
+ * ends in the given registry anchor. The `application/problem+json` content
+ * type is only a SHOULD (spec "Error Handling"), so it is not checked.
  *
  * @param options {object}
  * @param options.response {Response}
@@ -172,10 +214,6 @@ async function assertProblem({
   type: string
 }): Promise<any> {
   assert.equal(response.status, status)
-  assert.match(
-    response.headers.get('content-type') ?? '',
-    /application\/problem\+json/
-  )
   const problem = await response.json()
   assert.equal(problem.type, `https://w3id.org/pws#${type}`)
   return problem
@@ -204,20 +242,21 @@ export const governedLogApi: Suite<State> = {
     })
 
     function collectionUrl(collectionId: string): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}`,
-        ctx.serverUrl
-      ).toString()
+      return collectionUrlOf({ spaceUrl: alice.space1.url, collectionId })
+    }
+
+    function metaUrl(collectionId: string): string {
+      return collectionMetaUrl({ spaceUrl: alice.space1.url, collectionId })
     }
 
     function logUrl(collectionId: string): string {
-      return `${collectionUrl(collectionId)}/meta/log`
+      return collectionLogUrl({ spaceUrl: alice.space1.url, collectionId })
     }
 
     async function freshCollection(body: object = {}): Promise<string> {
       const collectionId = `col-${ctx.generateId()}`
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'POST',
         action: 'POST',
         json: { id: collectionId, name: collectionId, ...body }
@@ -309,12 +348,16 @@ export const governedLogApi: Suite<State> = {
       specIdentifier: ENCRYPTED_COLLECTIONS_IDENTIFIER
     })
     const governedSupported = features.includes('governed-history-logs')
+    const coreFeatures = await serviceFeatures({ serverUrl: ctx.serverUrl })
+    const encryptionSupported = coreFeatures.includes('encryption')
 
     return {
       alice,
       bob,
       governedSupported,
+      encryptionSupported,
       collectionUrl,
+      metaUrl,
       logUrl,
       freshCollection,
       governedCollection,
@@ -327,7 +370,7 @@ export const governedLogApi: Suite<State> = {
     const { alice } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'DELETE'
       })
     } catch {
@@ -340,10 +383,8 @@ export const governedLogApi: Suite<State> = {
       id: 'governed-log.guarded-create-derives-encryption',
       name: '[root] a guarded create governs the Collection: encryption is the head state plus history',
       run: async (ctx, state) => {
-        const { alice, collectionUrl, logUrl, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        const { alice, metaUrl, logUrl, governedCollection } = state
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId } = await governedCollection()
         const expected = {
           ...oneEpoch,
@@ -354,7 +395,7 @@ export const governedLogApi: Suite<State> = {
         }
 
         const described = await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/meta`,
+          url: metaUrl(collectionId),
           method: 'GET'
         })
         assert.deepStrictEqual(described.data.encryption, expected)
@@ -365,9 +406,7 @@ export const governedLogApi: Suite<State> = {
       name: '[root] the log reads back verbatim as text/jsonl with the ETag the create returned',
       run: async (ctx, state) => {
         const { getLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, body, etag } = await governedCollection()
         const read = await getLog({ collectionId })
         assert.equal(read.status, 200)
@@ -383,9 +422,7 @@ export const governedLogApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#caching'],
       run: async (ctx, state) => {
         const { getLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, etag } = await governedCollection()
         const conditional = await getLog({
           collectionId,
@@ -401,9 +438,7 @@ export const governedLogApi: Suite<State> = {
       name: '[root] a Collection with no log is 404 on the log read, and a nonexistent Collection is 404 on the log write',
       run: async (ctx, state) => {
         const { freshCollection, getLog, putLog } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: false })
         const collectionId = await freshCollection()
         await assertProblem({
           response: await getLog({ collectionId }),
@@ -426,13 +461,11 @@ export const governedLogApi: Suite<State> = {
       id: 'governed-log.append-compare-and-swap',
       name: '[root] an If-Match append lands, bumps the log ETag, and moves the derived member to the new head',
       run: async (ctx, state) => {
-        const { alice, collectionUrl, putLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        const { alice, metaUrl, putLog, governedCollection } = state
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, body, etag } = await governedCollection()
         const before = await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/meta`,
+          url: metaUrl(collectionId),
           method: 'GET'
         })
 
@@ -449,7 +482,7 @@ export const governedLogApi: Suite<State> = {
         assert.notEqual(newEtag, etag)
 
         const after = await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/meta`,
+          url: metaUrl(collectionId),
           method: 'GET'
         })
         assert.equal(after.data.encryption.currentEpoch, 'urn:epoch:2')
@@ -469,9 +502,7 @@ export const governedLogApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#precondition-failed'],
       run: async (ctx, state) => {
         const { getLog, putLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, body, etag } = await governedCollection()
         const extended =
           body + entryLine({ ordinal: 2, state: twoEpochs }) + '\n'
@@ -500,16 +531,14 @@ export const governedLogApi: Suite<State> = {
     },
     {
       id: 'governed-log.append-fast-forward-only',
-      name: '[root] an append must fast-forward the stored log: a rewritten prefix is 412 under a current If-Match, adding several lines is 400, re-sending the stored log is a no-op 204, and the log is unchanged',
+      name: '[root] an append must fast-forward the stored log: a rewritten prefix is 412 under a current If-Match, adding several lines is 400, re-sending the stored log unchanged is 400, and the log is unchanged',
       specRefs: [
         'https://w3id.org/pws#precondition-failed',
         'https://w3id.org/pws#invalid-request-body'
       ],
       run: async (ctx, state) => {
         const { getLog, putLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, body, etag } = await governedCollection()
         const secondLine = entryLine({ ordinal: 2, state: twoEpochs }) + '\n'
 
@@ -547,14 +576,18 @@ export const governedLogApi: Suite<State> = {
           type: 'invalid-request-body'
         })
 
-        // The stored bytes alone: a no-op answered 204 with the current ETag.
-        const resend = await putLog({
-          collectionId,
-          body,
-          headers: { 'if-match': etag }
+        // The stored bytes alone extend the log by no line, which the spec
+        // refuses like several lines (spec "Write Governing History Log
+        // Operation").
+        await assertProblem({
+          response: await putLog({
+            collectionId,
+            body,
+            headers: { 'if-match': etag }
+          }),
+          status: 400,
+          type: 'invalid-request-body'
         })
-        assert.equal(resend.status, 204)
-        assert.equal(resend.headers.get('etag'), etag)
 
         const read = await getLog({ collectionId })
         assert.equal(read.headers.get('etag'), etag)
@@ -567,9 +600,7 @@ export const governedLogApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#precondition-failed'],
       run: async (ctx, state) => {
         const { putLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, body } = await governedCollection()
         await assertProblem({
           response: await putLog({
@@ -587,15 +618,13 @@ export const governedLogApi: Suite<State> = {
       name: '[root] a direct encryption write on a governed Collection is 409 encryption-history-log-governed',
       specRefs: ['https://w3id.org/pws#encryption-history-log-governed'],
       run: async (ctx, state) => {
-        const { alice, collectionUrl, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        const { alice, metaUrl, governedCollection } = state
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId } = await governedCollection()
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: `${collectionUrl(collectionId)}/meta`,
+            url: metaUrl(collectionId),
             method: 'PUT',
             action: 'PUT',
             json: { id: collectionId, encryption: twoEpochs }
@@ -613,19 +642,19 @@ export const governedLogApi: Suite<State> = {
         // The descriptor is untouched, and a Metadata object update that
         // leaves `encryption` alone still lands.
         const described = await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/meta`,
+          url: metaUrl(collectionId),
           method: 'GET'
         })
         assert.equal(described.data.encryption.currentEpoch, 'urn:epoch:1')
         const renamed = await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/meta`,
+          url: metaUrl(collectionId),
           method: 'PUT',
           action: 'PUT',
           json: { id: collectionId, name: 'Renamed' }
         })
         assert.equal(renamed.status, 204)
         const reread = await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/meta`,
+          url: metaUrl(collectionId),
           method: 'GET'
         })
         assert.equal(reread.data.name, 'Renamed')
@@ -638,9 +667,7 @@ export const governedLogApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#collection-metadata-data-model'],
       run: async (ctx, state) => {
         const { freshCollection, getLog, putLog } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const collectionId = await freshCollection()
         const body = genesisLine(twoEpochs) + '\n'
         const created = await putLog({
@@ -661,10 +688,6 @@ export const governedLogApi: Suite<State> = {
           headers: { 'if-match': etag! }
         })
         assert.equal(response.status, 400)
-        assert.match(
-          response.headers.get('content-type') ?? '',
-          /application\/problem\+json/
-        )
         const read = await getLog({ collectionId })
         assert.equal(read.headers.get('etag'), etag)
         assert.equal(await read.text(), body)
@@ -676,9 +699,7 @@ export const governedLogApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#invalid-request-body'],
       run: async (ctx, state) => {
         const { freshCollection, getLog, putLog } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: false })
         const collectionId = await freshCollection()
         const bodies = [
           // Empty: no head entry.
@@ -715,9 +736,7 @@ export const governedLogApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#encryption-immutable'],
       run: async (ctx, state) => {
         const { freshCollection, getLog, putLog } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const collectionId = await freshCollection({
           encryption: { scheme: 'edv' }
         })
@@ -741,12 +760,11 @@ export const governedLogApi: Suite<State> = {
         'https://w3id.org/pws#update-or-create-by-id-collection-operation'
       ],
       run: async (ctx, state) => {
-        const { alice, collectionUrl, getLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        const { alice, collectionUrl, metaUrl, getLog, governedCollection } =
+          state
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, etag } = await governedCollection()
-        const itemsUrl = `${collectionUrl(collectionId)}/`
+        const itemsUrl = collectionUrl(collectionId)
 
         // The governed Collection is encrypted: a plaintext Resource is
         // refused by the envelope rule while a conforming envelope lands. The
@@ -783,7 +801,7 @@ export const governedLogApi: Suite<State> = {
 
         // A `/meta` write leaves the log (and its ETag) alone.
         const meta = await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/meta`,
+          url: metaUrl(collectionId),
           method: 'PUT',
           action: 'PUT',
           json: { custom: edvDocument }
@@ -798,9 +816,7 @@ export const governedLogApi: Suite<State> = {
       run: async (ctx, state) => {
         const { alice, collectionUrl, getLog, governedCollection } = state
         const { aliceDelegatedApp } = ctx.actors
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, body } = await governedCollection()
         // A Space-rooted grant: the chain descends from the Space's root
         // capability to the Collection's items subtree, which the log URL
@@ -808,7 +824,7 @@ export const governedLogApi: Suite<State> = {
         const capability = await alice.pws.grant({
           to: aliceDelegatedApp.did,
           actions: ['GET'],
-          target: `${collectionUrl(collectionId)}/`,
+          target: collectionUrl(collectionId),
           spaceUrl: alice.space1.url
         })
         const read = await getLog({
@@ -826,9 +842,7 @@ export const governedLogApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#not-found'],
       run: async (ctx, state) => {
         const { bob, getLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId } = await governedCollection()
         await assertProblem({
           response: await getLog({
@@ -845,23 +859,22 @@ export const governedLogApi: Suite<State> = {
       name: '[root] deleting the Collection takes the log with it: a re-created Collection is ungoverned',
       specRefs: ['https://w3id.org/pws#delete-collection-operation'],
       run: async (ctx, state) => {
-        const { alice, collectionUrl, putLog, governedCollection } = state
-        if (!state.governedSupported) {
-          ctx.skip('the server does not advertise governed-history-logs')
-        }
+        const { alice, collectionUrl, metaUrl, putLog, governedCollection } =
+          state
+        requireFeatures({ ctx, state, encryption: true })
         const { collectionId, body } = await governedCollection()
         await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/`,
+          url: collectionUrl(collectionId),
           method: 'DELETE'
         })
         await alice.rootClient.request({
-          url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+          url: alice.space1.url,
           method: 'POST',
           action: 'POST',
           json: { id: collectionId, name: collectionId }
         })
         const described = await alice.rootClient.request({
-          url: `${collectionUrl(collectionId)}/meta`,
+          url: metaUrl(collectionId),
           method: 'GET'
         })
         assert.equal(described.data.encryption, undefined)

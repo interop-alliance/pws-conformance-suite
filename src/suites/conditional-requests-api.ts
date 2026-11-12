@@ -23,29 +23,33 @@
  */
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import type { ISigner } from '@interop/data-integrity-core'
+import {
+  collectionMetaUrl,
+  collectionUrl as collectionUrlOf,
+  spaceMetaUrl,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
-import { assertResourceWriteResponse } from '../helpers.js'
+import { assertResourceWriteResponse, capabilityActionFor } from '../helpers.js'
 import type { Suite } from '../harness/types.js'
 
 interface State {
   alice: any
   bob: any
+  spaceUrl: string
   collectionUrl: string
 }
 
 /**
  * Asserts a rejected conditional write reports a precondition failure: status
- * 412, an `application/problem+json` body, and the `precondition-failed` type.
+ * 412 and the `precondition-failed` type. `application/problem+json` is a
+ * SHOULD, so the media type is not asserted.
  *
  * @param expectedError {any}   the error thrown by `ZcapClient.request()`
  */
 function assertPreconditionFailed(expectedError: any): void {
   assert.ok(expectedError, 'expected the conditional write to fail with 412')
   assert.equal(expectedError.response.status, 412)
-  assert.match(
-    expectedError.response.headers.get('content-type'),
-    /application\/problem\+json/
-  )
   assert.equal(
     expectedError.data.type,
     'https://w3id.org/pws#precondition-failed'
@@ -54,19 +58,15 @@ function assertPreconditionFailed(expectedError: any): void {
 
 /**
  * Asserts a rejected request carries the privacy-merged `not-found` mask:
- * status 404, `application/problem+json`, and the merged `not-found` type. An
- * under-authorized conditional write MUST surface this mask, never a 412 that
- * would confirm the target exists.
+ * status 404 and the merged `not-found` type. An under-authorized conditional
+ * write MUST surface this mask. A 412 would confirm the target exists.
+ * `application/problem+json` is a SHOULD, so the media type is not asserted.
  *
  * @param expectedError {any}   the error thrown by `ZcapClient.request()`
  */
 function assertNotFoundMask(expectedError: any): void {
   assert.ok(expectedError, 'expected the under-authorized write to fail')
   assert.equal(expectedError.response.status, 404)
-  assert.match(
-    expectedError.response.headers.get('content-type'),
-    /application\/problem\+json/
-  )
   assert.equal(expectedError.data.type, 'https://w3id.org/pws#not-found')
 }
 
@@ -100,7 +100,8 @@ async function readResource({
     method,
     headers: { date: new Date().toUTCString() },
     invocationSigner,
-    capabilityAction: method
+    // A HEAD names the `GET` action.
+    capabilityAction: capabilityActionFor(method)
   })
   return fetch(url, {
     method,
@@ -123,6 +124,10 @@ export const conditionalRequestsApi: Suite<State> = {
     const alice: any = { ...ctx.actors.alice }
     const bob: any = { ...ctx.actors.bob }
     alice.space1 = { id: ctx.generateId() }
+    const spaceUrl = spaceUrlById({
+      baseServerUrl: ctx.serverUrl,
+      spaceId: alice.space1.id
+    })
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -133,24 +138,21 @@ export const conditionalRequestsApi: Suite<State> = {
     })
     // A plain JSON Collection to hold the per-test Resources.
     await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+      url: spaceUrl,
       method: 'POST',
       action: 'POST',
       json: { id: 'items', name: 'Items' }
     })
-    const collectionUrl = new URL(
-      `/space/${alice.space1.id}/items/`,
-      ctx.serverUrl
-    ).toString()
+    const collectionUrl = collectionUrlOf({ spaceUrl, collectionId: 'items' })
 
-    return { alice, bob, collectionUrl }
+    return { alice, bob, spaceUrl, collectionUrl }
   },
 
   teardown: async (ctx, state) => {
-    const { alice } = state
+    const { alice, spaceUrl } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: spaceUrl,
         method: 'DELETE'
       })
     } catch {
@@ -655,11 +657,11 @@ export const conditionalRequestsApi: Suite<State> = {
         'https://w3id.org/pws#precondition-failed'
       ],
       run: async (ctx, state) => {
-        const { alice } = state
-        const metaUrl = new URL(
-          `/space/${alice.space1.id}/guarded-collection/meta`,
-          ctx.serverUrl
-        ).toString()
+        const { alice, spaceUrl } = state
+        const metaUrl = collectionMetaUrl({
+          spaceUrl,
+          collectionId: 'guarded-collection'
+        })
 
         // The guarded create proceeds on an absent Collection.
         const created = await alice.rootClient.request({
@@ -724,22 +726,19 @@ export const conditionalRequestsApi: Suite<State> = {
         'https://w3id.org/pws#precondition-failed'
       ],
       run: async (ctx, state) => {
-        const { alice } = state
+        const { alice, spaceUrl } = state
         const collectionId = ctx.generateId()
 
         // The Collection's Metadata object comes into being with the
         // Collection itself, via the ordinary POST create -- never via a
         // guarded PUT and never annotated.
         await alice.rootClient.request({
-          url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+          url: spaceUrl,
           method: 'POST',
           action: 'POST',
           json: { id: collectionId, name: 'Never Guarded' }
         })
-        const metaUrl = new URL(
-          `/space/${alice.space1.id}/${collectionId}/meta`,
-          ctx.serverUrl
-        ).toString()
+        const metaUrl = collectionMetaUrl({ spaceUrl, collectionId })
 
         // The object already exists, so the create-only precondition MUST
         // 412 even though the client never wrote to `meta` directly.
@@ -776,18 +775,15 @@ export const conditionalRequestsApi: Suite<State> = {
         'https://w3id.org/pws#read-collection-metadata-operation'
       ],
       run: async (ctx, state) => {
-        const { alice } = state
+        const { alice, spaceUrl } = state
         const collectionId = ctx.generateId()
         await alice.rootClient.request({
-          url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+          url: spaceUrl,
           method: 'POST',
           action: 'POST',
           json: { id: collectionId, name: 'Meta 304' }
         })
-        const metaUrl = new URL(
-          `/space/${alice.space1.id}/${collectionId}/meta`,
-          ctx.serverUrl
-        ).toString()
+        const metaUrl = collectionMetaUrl({ spaceUrl, collectionId })
 
         const read = await readResource({
           url: metaUrl,
@@ -825,11 +821,8 @@ export const conditionalRequestsApi: Suite<State> = {
         'https://w3id.org/pws#read-space-operation'
       ],
       run: async (ctx, state) => {
-        const { alice } = state
-        const metaUrl = new URL(
-          `/space/${alice.space1.id}/meta`,
-          ctx.serverUrl
-        ).toString()
+        const { alice, spaceUrl } = state
+        const metaUrl = spaceMetaUrl({ spaceUrl })
         const read = await readResource({
           url: metaUrl,
           method: 'GET',
@@ -870,8 +863,8 @@ export const conditionalRequestsApi: Suite<State> = {
       run: async (ctx, state) => {
         const { alice } = state
         const spaceId = ctx.generateId()
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
-        const metaUrl = `${spaceUrl}meta`
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+        const metaUrl = spaceMetaUrl({ spaceUrl })
         try {
           // The create carries the onboarding token when one is configured;
           // the losing PUT below targets a present Space, so it is an update
@@ -941,8 +934,8 @@ export const conditionalRequestsApi: Suite<State> = {
       run: async (ctx, state) => {
         const { alice } = state
         const spaceId = ctx.generateId()
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
-        const metaUrl = `${spaceUrl}meta`
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+        const metaUrl = spaceMetaUrl({ spaceUrl })
         const description = (name: string) => ({
           id: spaceId,
           name,
@@ -1026,7 +1019,7 @@ export const conditionalRequestsApi: Suite<State> = {
       id: 'conditional.post-response-no-store',
       name:
         '[root] the response to a POST (non-idempotent) is marked ' +
-        'non-cacheable with Cache-Control: no-store',
+        'non-cacheable (Cache-Control carries a `no-store` directive)',
       optional: true,
       specRefs: ['https://w3id.org/pws#caching'],
       run: async (ctx, state) => {
@@ -1038,7 +1031,17 @@ export const conditionalRequestsApi: Suite<State> = {
           json: { name: 'posted' }
         })
         assert.equal(response.status, 201)
-        assert.equal(response.headers.get('cache-control'), 'no-store')
+        // The spec gives `Cache-Control: no-store` as an example of marking
+        // a response non-cacheable. Check for the directive itself, so other
+        // directives beside it (`private`, `no-cache`) do not fail the case.
+        const cacheControl = response.headers.get('cache-control') ?? ''
+        const directives = cacheControl
+          .split(',')
+          .map((directive: string) => directive.trim().toLowerCase())
+        assert.ok(
+          directives.includes('no-store'),
+          `expected a \`no-store\` Cache-Control directive, got "${cacheControl}"`
+        )
       }
     }
   ]

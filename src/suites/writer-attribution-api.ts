@@ -13,9 +13,9 @@
  * Resource Metadata operation skips when the token is absent, matching how
  * `changes-query-api` gates its own feature. The tombstone check further
  * depends on the `changes-query` feature, since the only place a delete's
- * `writerId` surfaces is that feed. The Collection listing check runs
- * unconditionally, matching `collection-api`'s own unconditional listing
- * test.
+ * `writerId` surfaces is that feed. The Collection listing check further
+ * depends on the `listing` feature, and since a listing item's `writerId` is
+ * optional, it only requires that a label the listing does carry is current.
  *
  * A content write (`PUT` or `POST`) and a `DELETE` declare the label via the
  * `Writer-Id` request header. They are declare-or-clear: an absent header
@@ -23,16 +23,26 @@
  * Metadata request (`PUT .../meta`) leaves the label untouched, and a
  * `writerId` member in its body is not read.
  */
+import {
+  collectionQueryUrl,
+  collectionUrl,
+  resourceMetaUrl,
+  resourceUrl as resourceUrlOf,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
 import { serviceFeatures } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
 
 interface State {
   alice: any
+  spaceUrl: string
   collectionId: string
   metadataSupported: boolean
   changesSupported: boolean
+  listingSupported: boolean
   resourceUrl: (id: string) => string
+  resourceMetaUrl: (id: string) => string
   queryUrl: () => string
 }
 
@@ -43,24 +53,26 @@ export const writerAttributionApi: Suite<State> = {
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
     const collectionId = 'attribution'
+    alice.space1 = { id: ctx.generateId() }
+    const spaceUrl = spaceUrlById({
+      baseServerUrl: ctx.serverUrl,
+      spaceId: alice.space1.id
+    })
 
     /** Absolute URL for a Resource in this Space's `attribution` collection. */
     function resourceUrl(id: string): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/${id}`,
-        ctx.serverUrl
-      ).toString()
+      return resourceUrlOf({ spaceUrl, collectionId, resourceId: id })
+    }
+
+    function resourceMeta(id: string): string {
+      return resourceMetaUrl({ spaceUrl, collectionId, resourceId: id })
     }
 
     /** Absolute URL for the `attribution` collection's changes-query endpoint. */
     function queryUrl(): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/query`,
-        ctx.serverUrl
-      ).toString()
+      return collectionQueryUrl({ spaceUrl, collectionId })
     }
 
-    alice.space1 = { id: ctx.generateId() }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -70,7 +82,7 @@ export const writerAttributionApi: Suite<State> = {
       rootClient: alice.rootClient
     })
     await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+      url: spaceUrl,
       method: 'POST',
       action: 'POST',
       json: { id: collectionId, name: 'Writer Attribution' }
@@ -79,22 +91,26 @@ export const writerAttributionApi: Suite<State> = {
     const features = await serviceFeatures({ serverUrl: ctx.serverUrl })
     const metadataSupported = features.includes('metadata')
     const changesSupported = features.includes('changes-query')
+    const listingSupported = features.includes('listing')
 
     return {
       alice,
+      spaceUrl,
       collectionId,
       metadataSupported,
       changesSupported,
+      listingSupported,
       resourceUrl,
+      resourceMetaUrl: resourceMeta,
       queryUrl
     }
   },
 
   teardown: async (ctx, state) => {
-    const { alice } = state
+    const { alice, spaceUrl } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: spaceUrl,
         method: 'DELETE'
       })
     } catch {
@@ -106,8 +122,9 @@ export const writerAttributionApi: Suite<State> = {
     {
       id: 'writer-attribution.content-write-declares-and-clears',
       name:
-        '[root] a content write declares `writerId` (/meta, listing, ' +
-        'changes feed); a following write with no header clears it',
+        '[root] a content write declares `writerId` (/meta, and where ' +
+        'served the listing and changes feed); a following write with no ' +
+        'header clears it',
       specRefs: [
         'https://w3id.org/pws#writer-attribution',
         'https://w3id.org/pws#resource-metadata-data-model',
@@ -116,8 +133,14 @@ export const writerAttributionApi: Suite<State> = {
         'https://w3id.org/pws#query-profile-changes'
       ],
       run: async (ctx, state) => {
-        const { alice, collectionId, metadataSupported, changesSupported } =
-          state
+        const {
+          alice,
+          spaceUrl,
+          collectionId,
+          metadataSupported,
+          changesSupported,
+          listingSupported
+        } = state
         if (!metadataSupported) {
           ctx.skip('the service description does not advertise metadata')
         }
@@ -134,23 +157,26 @@ export const writerAttributionApi: Suite<State> = {
         })
 
         const meta1 = await alice.rootClient.request({
-          url: `${url}/meta`,
+          url: state.resourceMetaUrl(resourceId),
           method: 'GET'
         })
         assert.equal(meta1.data.writerId, 'w1')
 
-        const listing1 = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/${collectionId}/`,
-            ctx.serverUrl
-          ).toString(),
-          method: 'GET'
-        })
-        const item1 = listing1.data.items.find(
-          (it: any) => it.id === resourceId
-        )
-        assert.ok(item1, 'expected the written resource in the listing')
-        assert.equal(item1.writerId, 'w1')
+        // A listing item's `writerId` is optional. Where the item carries
+        // one, it must be the current label.
+        if (listingSupported) {
+          const listing1 = await alice.rootClient.request({
+            url: collectionUrl({ spaceUrl, collectionId }),
+            method: 'GET'
+          })
+          const item1 = listing1.data.items.find(
+            (it: any) => it.id === resourceId
+          )
+          assert.ok(item1, 'expected the written resource in the listing')
+          if (item1.writerId !== undefined) {
+            assert.equal(item1.writerId, 'w1')
+          }
+        }
 
         if (changesSupported) {
           const changes1 = await alice.rootClient.request({
@@ -175,23 +201,23 @@ export const writerAttributionApi: Suite<State> = {
         })
 
         const meta2 = await alice.rootClient.request({
-          url: `${url}/meta`,
+          url: state.resourceMetaUrl(resourceId),
           method: 'GET'
         })
         assert.equal(meta2.data.writerId, undefined)
 
-        const listing2 = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/${collectionId}/`,
-            ctx.serverUrl
-          ).toString(),
-          method: 'GET'
-        })
-        const item2 = listing2.data.items.find(
-          (it: any) => it.id === resourceId
-        )
-        assert.ok(item2, 'expected the updated resource in the listing')
-        assert.equal(item2.writerId, undefined)
+        // A cleared label must not linger on the listing item.
+        if (listingSupported) {
+          const listing2 = await alice.rootClient.request({
+            url: collectionUrl({ spaceUrl, collectionId }),
+            method: 'GET'
+          })
+          const item2 = listing2.data.items.find(
+            (it: any) => it.id === resourceId
+          )
+          assert.ok(item2, 'expected the updated resource in the listing')
+          assert.equal(item2.writerId, undefined)
+        }
 
         if (changesSupported) {
           const changes2 = await alice.rootClient.request({
@@ -216,15 +242,12 @@ export const writerAttributionApi: Suite<State> = {
         'https://w3id.org/pws#create-resource-add-resource-to-collection-operation'
       ],
       run: async (ctx, state) => {
-        const { alice, collectionId, metadataSupported } = state
+        const { alice, spaceUrl, collectionId, metadataSupported } = state
         if (!metadataSupported) {
           ctx.skip('the service description does not advertise metadata')
         }
         const created = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/${collectionId}/`,
-            ctx.serverUrl
-          ).toString(),
+          url: collectionUrl({ spaceUrl, collectionId }),
           method: 'POST',
           action: 'POST',
           json: { message: 'hi' },
@@ -234,6 +257,7 @@ export const writerAttributionApi: Suite<State> = {
         assert.ok(resourceUrl, 'expected a Location header on the create')
 
         const meta = await alice.rootClient.request({
+          // Resolved from the server's `Location`, so the id is not known.
           url: `${resourceUrl}/meta`,
           method: 'GET'
         })
@@ -316,7 +340,7 @@ export const writerAttributionApi: Suite<State> = {
           { writerId: 123 }
         ]) {
           const response = await alice.rootClient.request({
-            url: `${url}/meta`,
+            url: state.resourceMetaUrl(resourceId),
             method: 'PUT',
             action: 'PUT',
             json
@@ -326,7 +350,7 @@ export const writerAttributionApi: Suite<State> = {
             `expected 204 or 200 for ${JSON.stringify(json)}, got ${response.status}`
           )
           const meta = await alice.rootClient.request({
-            url: `${url}/meta`,
+            url: state.resourceMetaUrl(resourceId),
             method: 'GET'
           })
           assert.equal(meta.data.writerId, 'w5')

@@ -1,5 +1,83 @@
 # @interop/pws-conformance-suite Changelog
 
+## 0.38.0 - TBD
+
+### Added
+
+- `head.delegated-get-grant`: a GET-only grant authorizes a HEAD signed with the
+  GET action, and the HEAD headers match a GET under the same grant.
+
+### Changed
+
+- **BREAKING**: requires `@interop/pws-client` 0.106.0 or later (peer range
+  `>=0.106.0 <1.0.0`), for the URL builders it exports from `./paths`.
+- **BREAKING**: Four cases now assert the spec's answer where they disagreed
+  with it.
+  - `governed-log.append-fast-forward-only`: re-sending the stored log unchanged
+    is `invalid-request-body` (400). It was a no-op 204.
+  - `container-rule.collection-meta-put-delegated-collection-target`: a
+    delegated `PUT .../meta` under a Collection-URL grant is refused with the
+    masked 404. Only a grant on the Space URL qualifies for the exception.
+  - An anonymous write to a Space, Collection, or Resource is the masked 404.
+    The two case ids are renamed to match: `collection.create-unauthorized-401`
+    is `collection.create-unauthorized-404`, and
+    `policy.anonymous-write-rejected-401` is
+    `policy.anonymous-write-rejected-404`. No other case or suite id changed.
+- Cases for OPTIONAL features skip unless the service description advertises the
+  feature token: `encryption` (the encryption-descriptor suite, and the
+  governed-log, chunks, and blinded-index cases that declare `edv`), `export`,
+  `policy`, `backends`, `quotas`, `linksets`, `listing`, and `query` or
+  `changes-query`.
+- The multipart cases skip on a server that stores a multipart body as opaque
+  bytes.
+- Error responses are no longer required to use `application/problem+json`,
+  which the spec makes a SHOULD. `type` and `title` checks stay.
+- A 405 at a reserved endpoint requires the status and `Allow`. A problem body
+  is checked only when the server sends one.
+- Cases accept each answer the spec permits:
+  - A credential that fails verification (expired chain, uncovered `Digest`,
+    wrong holder, action or target mismatch) is `invalid-authorization-header`
+    (400) or the masked 404. `denial.expired` also accepts `capability-expired`.
+  - `repository.create-delegated-expired-400` and `-tampered-400` accept
+    `controller-mismatch` or `invalid-authorization-header`.
+  - `ordering.collection-quota-read-404` accepts 501 `unsupported-operation`.
+  - `encryption.unrecognized-scheme-400` accepts a descriptor stored as-is.
+- `denial.other-cause-not-found` uses a POST-only grant invoked as GET. `HEAD`
+  is not a defined capability action.
+- Every signed `HEAD` names the `GET` capability action. The action is passed
+  explicitly, so a client that defaults a `HEAD` invocation's action to `HEAD`
+  still sends `GET`.
+- `reserved-methods.head-follows-get` asserts that a `HEAD` gets the same status
+  as the `GET`.
+- Delegated grants no longer list `HEAD` in `allowedAction`. A `GET` grant
+  covers `HEAD`.
+- `service-description.link-on-redirect` skips when the server does not answer
+  308, which is a SHOULD.
+- `repository.create-unauthorized-401` and
+  `repository.error-body-type-and-title` send a well-formed body, so the missing
+  authorization is the only fault.
+- Metadata and listing checks require only the members the spec requires.
+  Optional members (`custom`, `createdAt`, `updatedAt`, `linkset`, `backends`, a
+  List Spaces `name`, a listing item's `writerId`, `totalItems`, the List
+  Collection envelope's `id`, `name`, `type`) are checked when present. Backend
+  descriptors need only `id`, and the backends listing need not contain
+  `default`.
+- Pagination cases follow `next` to the end and allow a trailing empty page.
+- `plaintext.indexes` is compared after expanding the bare-string shorthand.
+- `conditional.post-response-no-store` accepts any `Cache-Control` value that
+  carries a `no-store` directive.
+
+### Fixed
+
+- URLs are built from the base server URL with the `@interop/pws-client/paths`
+  builders, so a server mounted under a path is tested at the right URLs.
+  `Location`, `url`, `linkset`, and `next` values are resolved before comparing.
+- `service-description.pws-version-entry` reads `signatureAlgorithms` and
+  `zcapCryptosuites` from the authorization profile's entry.
+- `repository.list-scoped-to-controller` reads every page of the listing.
+- specRefs for the container rule and the Policy Type Registry point at the
+  authorization profile, and two dead anchors are corrected.
+
 ## 0.37.0 - 2026-11-12
 
 ### Added

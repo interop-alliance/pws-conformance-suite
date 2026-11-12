@@ -19,16 +19,18 @@
  * a well-behaved client always sets a content type.
  */
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
+import { collectionUrl, spaceUrlById } from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
 
 interface State {
   alice: any
+  spaceUrl: string
 }
 
 /**
- * Asserts a rejected create reports a reserved-id collision: status 409,
- * `application/problem+json`, and the `reserved-id` type.
+ * Asserts a rejected create reports a reserved-id collision: status 409 and
+ * the `reserved-id` type.
  *
  * @param expectedError {any}   the error thrown by ZcapClient.request()
  */
@@ -66,6 +68,10 @@ export const writeValidationApi: Suite<State> = {
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
     alice.space1 = { id: ctx.generateId() }
+    const spaceUrl = spaceUrlById({
+      baseServerUrl: ctx.serverUrl,
+      spaceId: alice.space1.id
+    })
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -75,19 +81,19 @@ export const writeValidationApi: Suite<State> = {
       rootClient: alice.rootClient
     })
     await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+      url: spaceUrl,
       method: 'POST',
       action: 'POST',
       json: { id: 'docs', name: 'Documents' }
     })
-    return { alice }
+    return { alice, spaceUrl }
   },
 
   teardown: async (ctx, state) => {
-    const { alice } = state
+    const { alice, spaceUrl } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: spaceUrl,
         method: 'DELETE'
       })
     } catch {
@@ -106,12 +112,11 @@ export const writeValidationApi: Suite<State> = {
         'https://w3id.org/pws#reserved-id'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
-        const { alice } = state
+        const { alice, spaceUrl } = state
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(`/space/${alice.space1.id}/`, serverUrl).toString(),
+            url: spaceUrl,
             method: 'POST',
             action: 'POST',
             json: { id: 'query', name: 'Reserved Collection Id Probe' }
@@ -132,21 +137,18 @@ export const writeValidationApi: Suite<State> = {
         'https://w3id.org/pws#update-or-create-by-id-collection-operation'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
-        const { alice } = state
+        const { alice, spaceUrl } = state
         // Create-by-id is a PUT of the Collection's Metadata object. With a
         // reserved segment in the Collection position the URL lies beneath
         // the `export` endpoint and names no Collection, so the server
         // answers as it does for any unmatched URL rather than reading the
         // segment as an id and refusing it as a conflict. Either way no
-        // Collection named `export` comes to exist.
+        // Collection named `export` comes to exist. The URL is formed by hand
+        // because the path builders refuse a reserved segment as an id.
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/export/meta`,
-              serverUrl
-            ).toString(),
+            url: `${spaceUrl}export/meta`,
             method: 'PUT',
             action: 'PUT',
             json: { name: 'Reserved Collection Id Probe' }
@@ -164,15 +166,12 @@ export const writeValidationApi: Suite<State> = {
         '(`export/x`) is not found (404)',
       specRefs: ['https://w3id.org/pws#space-level-reserved-endpoints'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
-        const { alice } = state
+        const { alice, spaceUrl } = state
         let expectedError: any
         try {
+          // Formed by hand: the path builders refuse a reserved segment.
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/export/x`,
-              serverUrl
-            ).toString(),
+            url: `${spaceUrl}export/x`,
             method: 'GET',
             action: 'GET'
           })
@@ -192,12 +191,8 @@ export const writeValidationApi: Suite<State> = {
         'https://w3id.org/pws#missing-content-type'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
-        const { alice } = state
-        const url = new URL(
-          `/space/${alice.space1.id}/docs/`,
-          serverUrl
-        ).toString()
+        const { alice, spaceUrl } = state
+        const url = collectionUrl({ spaceUrl, collectionId: 'docs' })
         // Sign a bodyless invocation: with no `Content-Type` on the request,
         // the signature legitimately covers neither `content-type` nor
         // `digest`, so the write reaches the content-type check itself.
@@ -215,11 +210,9 @@ export const writeValidationApi: Suite<State> = {
           headers: signatureHeaders as Record<string, string>,
           body: new TextEncoder().encode('no content type')
         })
+        // `application/problem+json` is a SHOULD, so the media type is not
+        // asserted. The `type` member is REQUIRED.
         assert.equal(response.status, 400)
-        assert.match(
-          response.headers.get('content-type') ?? '',
-          /application\/problem\+json/
-        )
         const problem: any = await response.json()
         assert.equal(problem.type, 'https://w3id.org/pws#missing-content-type')
       }

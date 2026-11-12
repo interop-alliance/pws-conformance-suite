@@ -51,6 +51,20 @@ export function zcapClient({ signer }: { signer: ISigner }): ZcapClient {
 }
 
 /**
+ * The capability action a signed request names for an HTTP method. The authz
+ * profile's action vocabulary is `GET`, `POST`, `PUT`, and `DELETE`. A `HEAD`
+ * is authorized as a `GET`, so its invocation names the `GET` action. Every
+ * other method names itself. The suite passes this explicitly because the
+ * clients it signs with may default a `HEAD` invocation's action to `HEAD`.
+ *
+ * @param method {string}   the request's HTTP method
+ * @returns {string}   the action to sign
+ */
+export function capabilityActionFor(method: string): string {
+  return method.toUpperCase() === 'HEAD' ? 'GET' : method
+}
+
+/**
  * Builds a high-level PWS client wrapping a ZcapClient for the given signer.
  * The `serverUrl` is the server's base server URL, passed to the client as
  * `baseServerUrl`.
@@ -505,11 +519,82 @@ export function assertResourceWriteResponse({
 }
 
 /**
+ * Asserts that a URL member of a server document, resolved against the URL
+ * the document was read from, names the expected absolute URL. The spec
+ * writes these members as relative URLs (`/space/{space_id}/`), and a server
+ * under a base path (`https://example.com/pws/`) prefixes them with it, so a
+ * literal comparison against a root-relative path would fail there.
+ *
+ * @param options {object}
+ * @param options.value {unknown}   the member as served
+ * @param options.base {string}   the URL the document was read from
+ * @param options.expected {string}   the absolute URL the member must name
+ * @param options.label {string}   the member, for the failure message
+ */
+export function assertResolvesTo({
+  value,
+  base,
+  expected,
+  label
+}: {
+  value: unknown
+  base: string
+  expected: string
+  label: string
+}): void {
+  assert.equal(typeof value, 'string', `expected ${label} to be a string`)
+  assert.equal(
+    new URL(value as string, base).toString(),
+    expected,
+    `expected ${label} "${value as string}" to name ${expected}`
+  )
+}
+
+/**
+ * Checks the `url` and `linkset` members of a Space or Collection Metadata
+ * object and returns the object without them, for an exact-shape comparison
+ * of the rest. Both are relative URLs (spec "Space Metadata Data Model",
+ * "Collection Metadata Data Model"). Each is resolved against the URL the
+ * object was read from. `url` must name the container itself, and `linkset`
+ * the container's linkset URL, which the caller forms with the path builder.
+ *
+ * @param options {object}
+ * @param options.value {unknown}   the Metadata object as served
+ * @param options.base {string}   the URL the object was read from
+ * @param options.containerUrl {string}   the container's absolute URL
+ * @param options.linksetUrl {string}   the container's absolute linkset URL
+ * @returns {Record<string, unknown>}   the object minus `url` and `linkset`
+ */
+export function withoutContainerUrls({
+  value,
+  base,
+  containerUrl,
+  linksetUrl
+}: {
+  value: unknown
+  base: string
+  containerUrl: string
+  linksetUrl: string
+}): Record<string, unknown> {
+  assert.ok(value && typeof value === 'object', 'expected a record object')
+  const { url, linkset, ...rest } = value as Record<string, unknown>
+  assertResolvesTo({ value: url, base, expected: containerUrl, label: '`url`' })
+  assertResolvesTo({
+    value: linkset,
+    base,
+    expected: linksetUrl,
+    label: '`linkset`'
+  })
+  return rest
+}
+
+/**
  * Checks the server-derived `backends` member of a Space Metadata object and
  * returns the object without it, for an exact-shape comparison of the rest.
- * The member is OPTIONAL (spec "Space Metadata Data Model"). A server that
- * advertises the `backends` feature carries the same listing
- * `GET /space/{space_id}/backends` serves. A server that does not omits it.
+ * The member is OPTIONAL (spec "Space Metadata Data Model"). When a server
+ * sends it, it is the same listing `GET /space/{space_id}/backends` serves. A
+ * server without pluggable backends omits it, so a server that does not
+ * advertise the `backends` feature must not send it.
  *
  * @param options {object}
  * @param options.serverUrl {string}
@@ -534,6 +619,9 @@ export async function checkBackendsMember({
       !('backends' in metadata),
       'a server without the backends feature omits `backends`'
     )
+    return rest
+  }
+  if (backends === undefined) {
     return rest
   }
   assert.ok(Array.isArray(backends), '`backends` must be an array')

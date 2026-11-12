@@ -3,27 +3,81 @@
  */
 /**
  * WAS conformance tests -- the Collection `plaintext` member and its `indexes`
- * declaration (server-side plaintext indexing for the `equality` query
- * profile). `plaintext` is the counterpart of `encryption`: at most one of the
+ * declaration (server-side plaintext indexing, spec "Collection Metadata Data
+ * Model"). `plaintext` is the counterpart of `encryption`: at most one of the
  * two is present on a Collection Metadata object, by presence, so an empty
  * `plaintext` object still excludes `encryption`. Unlike the set-once
  * `encryption`, `plaintext` is updatable for the Collection's life; `{}` is
  * its empty state.
  *
- * The suite is optional until the spec text for `plaintext` and the `equality`
- * profile is published; the shape is settled by the spec's decision record on
- * plaintext and encryption counterparts.
+ * The suite is optional. The member belongs to the OPTIONAL Collection
+ * management group, and no feature token advertises plaintext indexing.
  */
+import {
+  collectionMetaUrl,
+  resourceUrl as resourceUrlOf,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
 import type { Suite } from '../harness/types.js'
 
 interface State {
   alice: any
-  collectionUrl: (collectionId: string) => string
   resourceUrl: (collectionId: string, resourceId: string) => string
   createCollection: (json: object) => Promise<any>
   putCollection: (collectionId: string, json: object) => Promise<any>
   readCollection: (collectionId: string) => Promise<any>
+}
+
+/**
+ * A `plaintext` member with every `indexes` entry in its full object form, for
+ * comparison. The spec defines a bare string entry as shorthand for
+ * `{ name, source: 'content' }` and does not say which form a server stores
+ * and echoes. So both the sent and the echoed member are normalized: a string
+ * becomes `{ name, source: 'content', unique: false }`, and an object gets the
+ * `source` and `unique` defaults it omits.
+ *
+ * @param plaintext {unknown}   a `plaintext` member as sent or as echoed
+ * @returns {unknown}
+ */
+function normalizedPlaintext(plaintext: unknown): unknown {
+  if (
+    plaintext === null ||
+    typeof plaintext !== 'object' ||
+    !Array.isArray((plaintext as { indexes?: unknown }).indexes)
+  ) {
+    return plaintext
+  }
+  const { indexes, ...rest } = plaintext as { indexes: unknown[] }
+  return {
+    ...rest,
+    indexes: indexes.map(entry => {
+      if (typeof entry === 'string') {
+        return { name: entry, source: 'content', unique: false }
+      }
+      const {
+        source = 'content',
+        unique = false,
+        ...members
+      } = entry as Record<string, unknown>
+      return { ...members, source, unique }
+    })
+  }
+}
+
+/**
+ * Asserts that an echoed `plaintext` member declares the same indexes as the
+ * expected one, whichever entry form each uses.
+ *
+ * @param actual {unknown}   the echoed member
+ * @param expected {unknown}   the member as sent
+ * @returns {void}
+ */
+function assertPlaintextEqual(actual: unknown, expected: unknown): void {
+  assert.deepStrictEqual(
+    normalizedPlaintext(actual),
+    normalizedPlaintext(expected)
+  )
 }
 
 /**
@@ -51,9 +105,12 @@ export const plaintextDeclarationApi: Suite<State> = {
   specRefs: ['https://w3id.org/pws#collection-metadata-data-model'],
 
   setup: async ctx => {
-    const { serverUrl } = ctx
     const alice: any = { ...ctx.actors.alice }
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -63,22 +120,14 @@ export const plaintextDeclarationApi: Suite<State> = {
       rootClient: alice.rootClient
     })
 
-    function collectionUrl(collectionId: string): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}`,
-        serverUrl
-      ).toString()
-    }
+    const spaceUrl: string = alice.space1.url
     function resourceUrl(collectionId: string, resourceId: string): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/${resourceId}`,
-        serverUrl
-      ).toString()
+      return resourceUrlOf({ spaceUrl, collectionId, resourceId })
     }
     /** POSTs a Collection (raw, so a `plaintext` member can be sent). */
     function createCollection(json: object): Promise<any> {
       return alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, serverUrl).toString(),
+        url: spaceUrl,
         method: 'POST',
         action: 'POST',
         json
@@ -87,7 +136,7 @@ export const plaintextDeclarationApi: Suite<State> = {
     /** PUTs a Collection Metadata object by id (create-by-id or update). */
     function putCollection(collectionId: string, json: object): Promise<any> {
       return alice.rootClient.request({
-        url: `${collectionUrl(collectionId)}/meta`,
+        url: collectionMetaUrl({ spaceUrl, collectionId }),
         method: 'PUT',
         action: 'PUT',
         json
@@ -95,14 +144,13 @@ export const plaintextDeclarationApi: Suite<State> = {
     }
     function readCollection(collectionId: string): Promise<any> {
       return alice.rootClient.request({
-        url: `${collectionUrl(collectionId)}/meta`,
+        url: collectionMetaUrl({ spaceUrl, collectionId }),
         method: 'GET'
       })
     }
 
     return {
       alice,
-      collectionUrl,
       resourceUrl,
       createCollection,
       putCollection,
@@ -114,7 +162,7 @@ export const plaintextDeclarationApi: Suite<State> = {
     const { alice } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'DELETE'
       })
     } catch {
@@ -142,11 +190,11 @@ export const plaintextDeclarationApi: Suite<State> = {
           plaintext
         })
         assert.equal(response.status, 201)
-        assert.deepStrictEqual(response.data.plaintext, plaintext)
+        assertPlaintextEqual(response.data.plaintext, plaintext)
         assert.equal(response.data.encryption, undefined)
 
         const read = await readCollection('posts')
-        assert.deepStrictEqual(read.data.plaintext, plaintext)
+        assertPlaintextEqual(read.data.plaintext, plaintext)
       }
     },
     {
@@ -161,11 +209,11 @@ export const plaintextDeclarationApi: Suite<State> = {
           plaintext: { indexes: ['parentId'] }
         })
         assert.equal(response.status, 201)
-        assert.deepStrictEqual(response.data.plaintext, {
+        assertPlaintextEqual(response.data.plaintext, {
           indexes: ['parentId']
         })
         const read = await readCollection('posts-put')
-        assert.deepStrictEqual(read.data.plaintext, { indexes: ['parentId'] })
+        assertPlaintextEqual(read.data.plaintext, { indexes: ['parentId'] })
       }
     },
     {
@@ -356,13 +404,13 @@ export const plaintextDeclarationApi: Suite<State> = {
           plaintext: { indexes: ['parentId'] }
         })
         read = await readCollection('evolving')
-        assert.deepStrictEqual(read.data.plaintext, { indexes: ['parentId'] })
+        assertPlaintextEqual(read.data.plaintext, { indexes: ['parentId'] })
 
         // An update that omits `plaintext` leaves it untouched.
         await putCollection('evolving', { id: 'evolving', name: 'Renamed' })
         read = await readCollection('evolving')
         assert.equal(read.data.name, 'Renamed')
-        assert.deepStrictEqual(read.data.plaintext, { indexes: ['parentId'] })
+        assertPlaintextEqual(read.data.plaintext, { indexes: ['parentId'] })
 
         // Change: the supplied object replaces the stored one.
         await putCollection('evolving', {
@@ -370,7 +418,7 @@ export const plaintextDeclarationApi: Suite<State> = {
           plaintext: { indexes: ['author', { name: 'slug', unique: true }] }
         })
         read = await readCollection('evolving')
-        assert.deepStrictEqual(read.data.plaintext, {
+        assertPlaintextEqual(read.data.plaintext, {
           indexes: ['author', { name: 'slug', unique: true }]
         })
 
@@ -474,7 +522,7 @@ export const plaintextDeclarationApi: Suite<State> = {
         assert.equal(err.data.type, 'https://w3id.org/pws#id-conflict')
         // The stored declaration is unchanged.
         const read = await readCollection('late-unique')
-        assert.deepStrictEqual(read.data.plaintext, { indexes: ['slug'] })
+        assertPlaintextEqual(read.data.plaintext, { indexes: ['slug'] })
       }
     }
   ]

@@ -11,6 +11,7 @@ import type { Space } from '@interop/pws-client'
 import { resourceUrl } from '@interop/pws-client/paths'
 
 import assert from '../harness/assert.js'
+import { serviceFeatures } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
 
 interface State {
@@ -60,7 +61,15 @@ export const clientExportImport: Suite<State> = {
       name: 'exports a space to a tar archive and imports it into another',
       specRefs: ['https://w3id.org/pws#data-portability'],
       run: async (ctx, state) => {
-        const { newSpace, alice } = state
+        const { newSpace } = state
+        // Export and Import are an OPTIONAL extension, advertised by the
+        // `export` feature token (spec "Export Space operation"). The policy
+        // resource is another, advertised by `policy`.
+        const features = await serviceFeatures({ serverUrl: ctx.serverUrl })
+        if (!features.includes('export')) {
+          ctx.skip('the service description does not advertise export')
+        }
+        const policySupported = features.includes('policy')
         const source = await newSpace('Export Source')
         const collection = await source.createCollection({
           id: 'notes',
@@ -68,13 +77,11 @@ export const clientExportImport: Suite<State> = {
         })
         await collection.put('first', { body: 'one' })
         await collection.put('second', { body: 'two' })
-        // Make the collection world-readable so we can verify the policy survives
-        // the export/import round-trip.
-        await alice.pws.request({
-          url: `${source.url}notes/policy`,
-          method: 'PUT',
-          json: { type: 'PublicCanRead' }
-        })
+        // Make the collection world-readable so we can verify the policy
+        // survives the export/import round-trip.
+        if (policySupported) {
+          await collection.setPolicy({ type: 'PublicCanRead' })
+        }
 
         const archive = await source.export()
         assert.ok(archive instanceof Uint8Array)
@@ -84,13 +91,16 @@ export const clientExportImport: Suite<State> = {
         const stats = await target.import(archive)
         assert.ok(stats.collectionsCreated >= 1)
         assert.ok(stats.resourcesCreated >= 2)
-        assert.ok(stats.policiesCreated >= 1)
 
         const imported = (await target.collection('notes').get('first')) as any
         assert.equal(imported.body, 'one')
 
-        // The PublicCanRead policy round-tripped: an anonymous GET of the imported
-        // resource in the target space succeeds.
+        if (!policySupported) {
+          return
+        }
+        assert.ok(stats.policiesCreated >= 1)
+        // The PublicCanRead policy round-tripped: an anonymous GET of the
+        // imported resource in the target space succeeds.
         const anonResponse = await fetch(
           resourceUrl({
             spaceUrl: target.url,

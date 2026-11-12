@@ -8,9 +8,10 @@
  * A request to a reserved endpoint (see the spec's three Reserved Path
  * Segment Registry tables) with a method the server does not implement there
  * MUST be answered `405 Method Not Allowed`, with an `Allow` header naming
- * the methods it does implement, an `about:blank` problem type, and the
- * title "Method Not Allowed". An endpoint whose whole feature group is an
- * OPTIONAL extension the server does not implement at all is instead
+ * the methods it does implement. A problem body is optional. Where a server
+ * sends one, its type is `about:blank`. An endpoint whose whole feature
+ * group is an OPTIONAL extension the server does not implement at all is
+ * instead
  * governed by that group's own rule -- typically `unsupported-operation`
  * (501) -- so most cases here accept a 501 in place of the 405. Every case
  * is still required, since either answer is spec-conformant and any other
@@ -26,10 +27,33 @@
  * the high-level `ZcapClient.request()` so arbitrary methods (`PATCH`,
  * `HEAD`) and bodyless success responses can be inspected directly, without
  * the high-level client's success-body JSON parsing or its throw-on-4xx/5xx
- * behavior getting in the way.
+ * behavior getting in the way. Each invocation names the request method as
+ * its action, except a `HEAD`, which names the `GET` action.
  */
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
+import {
+  collectionBackendUrl,
+  collectionLinksetUrl,
+  collectionLogUrl,
+  collectionMetaUrl,
+  collectionPolicyUrl,
+  collectionQuotaUrl,
+  collectionUrl,
+  resourceChunksUrl,
+  resourceMetaUrl,
+  resourcePolicyUrl,
+  resourceUrl,
+  spaceBackendsUrl,
+  spaceExportUrl,
+  spaceImportUrl,
+  spaceLinksetUrl,
+  spaceMetaUrl,
+  spacePolicyUrl,
+  spaceQuotasUrl,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import type { ISigner } from '@interop/data-integrity-core'
+import { capabilityActionFor } from '../helpers.js'
 import assert from '../harness/assert.js'
 import type { Suite, TestCase } from '../harness/types.js'
 
@@ -74,7 +98,8 @@ async function signedRequest({
     },
     ...(body !== undefined && { body }),
     invocationSigner,
-    capabilityAction: method
+    // A HEAD names the `GET` action. Every other method names itself.
+    capabilityAction: capabilityActionFor(method)
   })
   return fetch(url, {
     method,
@@ -84,13 +109,18 @@ async function signedRequest({
 }
 
 /**
- * Reads a `application/problem+json` body, or `undefined` for a bodyless
- * response.
+ * Reads a JSON problem body (`application/json`, `application/problem+json`
+ * or another `+json` type), or `undefined` when the response has no body or a
+ * non-JSON one.
  *
  * @param response {Response}
  * @returns {Promise<any>}
  */
 async function readProblem(response: Response): Promise<any> {
+  const contentType = response.headers.get('content-type') ?? ''
+  if (!/^application\/([^+\s;]+\+)?json\s*(;.*)?$/i.test(contentType)) {
+    return undefined
+  }
   const text = await response.text()
   return text ? JSON.parse(text) : undefined
 }
@@ -110,9 +140,10 @@ function allowedMethods(allow: string | null): string[] {
 
 /**
  * Sends a signed request for a method this specification does not define at
- * `url`, and asserts the spec "Methods at Reserved Endpoints" refusal: `405`,
- * an `Allow` header that does not name the refused method, and an
- * `about:blank` problem body titled "Method Not Allowed". When `tolerate501`
+ * `url`, and asserts the spec "Methods at Reserved Endpoints" refusal: `405`
+ * and an `Allow` header that does not name the refused method. A problem
+ * body is optional. When a JSON one is sent, its `type` must be `about:blank`
+ * and it must carry the `title` Error Handling requires. When `tolerate501`
  * is set, a `501 unsupported-operation` is also accepted -- the endpoint's
  * whole feature group may be unimplemented, in which case the group's own
  * rule governs instead of this subsection.
@@ -150,32 +181,36 @@ async function assertMethodRefused({
     405,
     `expected 405 for ${method} ${url}, got ${response.status}`
   )
-  const allow = response.headers.get('allow') ?? ''
+  const allowHeader = response.headers.get('allow')
+  assert.ok(
+    allowHeader !== null,
+    `expected an Allow header on the 405 refusing ${method} ${url}`
+  )
+  const allow = allowHeader ?? ''
   assert.ok(
     !allowedMethods(allow).includes(method),
     `Allow header should not list ${method} for ${url} (got "${allow}")`
   )
-  assert.match(
-    response.headers.get('content-type') ?? '',
-    /application\/problem\+json/,
-    `expected a problem+json body refusing ${method} ${url}`
-  )
   const problem = await readProblem(response)
-  assert.equal(
-    problem?.type,
-    'about:blank',
-    `expected an about:blank problem type refusing ${method} ${url}`
-  )
-  assert.equal(
-    problem?.title,
-    'Method Not Allowed',
-    `expected the title "Method Not Allowed" refusing ${method} ${url}`
-  )
+  if (problem !== undefined) {
+    assert.equal(
+      problem.type,
+      'about:blank',
+      `expected an about:blank problem type refusing ${method} ${url}`
+    )
+    assert.equal(
+      typeof problem.title,
+      'string',
+      `expected a problem title refusing ${method} ${url}`
+    )
+  }
   return { status: 405, allow }
 }
 
 /**
- * Builds the URL for a reserved segment at the given container level.
+ * Builds the URL for a reserved segment at the given container level. A
+ * segment the path builders cover goes through its builder. The rest are
+ * appended to the container URL the builders form.
  *
  * @param options {object}
  * @param options.serverUrl {string}
@@ -201,15 +236,42 @@ function reservedEndpointUrl({
   level: 'space' | 'collection' | 'resource'
   segment: string
 }): string {
-  let relativePath: string
+  const spaceUrl = spaceUrlById({ baseServerUrl: serverUrl, spaceId })
   if (level === 'space') {
-    relativePath = `/space/${spaceId}/${segment}`
-  } else if (level === 'collection') {
-    relativePath = `/space/${spaceId}/${collectionId}/${segment}`
-  } else {
-    relativePath = `/space/${spaceId}/${collectionId}/${resourceId}/${segment}`
+    const builders: Record<string, (() => string) | undefined> = {
+      meta: () => spaceMetaUrl({ spaceUrl }),
+      policy: () => spacePolicyUrl({ spaceUrl }),
+      backends: () => spaceBackendsUrl({ spaceUrl }),
+      export: () => spaceExportUrl({ spaceUrl }),
+      import: () => spaceImportUrl({ spaceUrl }),
+      linkset: () => spaceLinksetUrl({ spaceUrl }),
+      quotas: () => spaceQuotasUrl({ spaceUrl })
+    }
+    // `collections` is the retired segment and `query` has no Space-level
+    // builder, so those are appended by hand.
+    return builders[segment]?.() ?? `${spaceUrl}${segment}`
   }
-  return new URL(relativePath, serverUrl).toString()
+  if (level === 'collection') {
+    const ids = { spaceUrl, collectionId }
+    const builders: Record<string, (() => string) | undefined> = {
+      policy: () => collectionPolicyUrl(ids),
+      backend: () => collectionBackendUrl(ids),
+      linkset: () => collectionLinksetUrl(ids),
+      meta: () => collectionMetaUrl(ids),
+      'meta/log': () => collectionLogUrl(ids),
+      quota: () => collectionQuotaUrl(ids)
+    }
+    // Any other segment is appended by hand.
+    return builders[segment]?.() ?? `${collectionUrl(ids)}${segment}`
+  }
+  const ids = { spaceUrl, collectionId, resourceId }
+  const builders: Record<string, (() => string) | undefined> = {
+    meta: () => resourceMetaUrl(ids),
+    'chunks/': () => resourceChunksUrl(ids),
+    policy: () => resourcePolicyUrl(ids)
+  }
+  // Any other segment is appended by hand.
+  return builders[segment]?.() ?? `${resourceUrl(ids)}/${segment}`
 }
 
 /**
@@ -507,7 +569,10 @@ export const reservedMethodsApi: Suite<State> = {
     const { alice } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: spaceUrlById({
+          baseServerUrl: ctx.serverUrl,
+          spaceId: alice.space1.id
+        }),
         method: 'DELETE'
       })
     } catch {
@@ -526,10 +591,10 @@ export const reservedMethodsApi: Suite<State> = {
       ],
       run: async (ctx, state) => {
         const { alice } = state
-        const url = new URL(
-          `/space/${alice.space1.id}/`,
-          ctx.serverUrl
-        ).toString()
+        const url = spaceUrlById({
+          baseServerUrl: ctx.serverUrl,
+          spaceId: alice.space1.id
+        })
         await assertMethodRefused({
           invocationSigner: alice.rootClient.invocationSigner,
           url,
@@ -546,10 +611,13 @@ export const reservedMethodsApi: Suite<State> = {
       ],
       run: async (ctx, state) => {
         const { alice, collectionId } = state
-        const url = new URL(
-          `/space/${alice.space1.id}/${collectionId}/`,
-          ctx.serverUrl
-        ).toString()
+        const url = collectionUrl({
+          spaceUrl: spaceUrlById({
+            baseServerUrl: ctx.serverUrl,
+            spaceId: alice.space1.id
+          }),
+          collectionId
+        })
         await assertMethodRefused({
           invocationSigner: alice.rootClient.invocationSigner,
           url,
@@ -568,7 +636,7 @@ export const reservedMethodsApi: Suite<State> = {
         const { alice } = state
         const answers: Array<{ status: number; allow: string }> = []
         for (const spaceId of [alice.space1.id, `absent-${ctx.generateId()}`]) {
-          const url = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
+          const url = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
           answers.push(
             await assertMethodRefused({
               invocationSigner: alice.rootClient.invocationSigner,
@@ -597,10 +665,14 @@ export const reservedMethodsApi: Suite<State> = {
       ],
       run: async (ctx, state) => {
         const { alice } = state
-        const url = new URL(
-          `/space/${alice.space1.id}/linkset`,
-          ctx.serverUrl
-        ).toString()
+        const url = reservedEndpointUrl({
+          serverUrl: ctx.serverUrl,
+          spaceId: alice.space1.id,
+          collectionId: state.collectionId,
+          resourceId: state.resourceId,
+          level: 'space',
+          segment: 'linkset'
+        })
         const getResponse = await signedRequest({
           url,
           method: 'GET',
@@ -619,9 +691,10 @@ export const reservedMethodsApi: Suite<State> = {
           method: 'HEAD',
           invocationSigner: alice.rootClient.invocationSigner
         })
-        assert.notEqual(
+        // A HEAD is authorized as a GET, so it gets the GET's answer.
+        assert.equal(
           headResponse.status,
-          405,
+          getResponse.status,
           'HEAD should follow GET rather than being refused'
         )
       }
@@ -635,10 +708,14 @@ export const reservedMethodsApi: Suite<State> = {
       specRefs: ['https://w3id.org/pws#methods-at-reserved-endpoints'],
       run: async (ctx, state) => {
         const { alice } = state
-        const url = new URL(
-          `/space/${alice.space1.id}/linkset`,
-          ctx.serverUrl
-        ).toString()
+        const url = reservedEndpointUrl({
+          serverUrl: ctx.serverUrl,
+          spaceId: alice.space1.id,
+          collectionId: state.collectionId,
+          resourceId: state.resourceId,
+          level: 'space',
+          segment: 'linkset'
+        })
         const response = await fetch(url, {
           method: 'OPTIONS',
           headers: {

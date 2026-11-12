@@ -11,9 +11,11 @@
  * description's WAS version entry. It varies by whether the server keeps an
  * ordered change log at all rather than by backend, which is why the token sits
  * there and not on a Backend description. `setup()` reads the document and the
- * tests exercising the profile skip when the token is absent; the two that
+ * tests exercising the profile skip when the token is absent. The two that
  * exercise the query endpoint's profile dispatch (an unknown profile, an
- * omitted one) hold for any server serving the endpoint and run unconditionally.
+ * omitted one) hold for any server serving the OPTIONAL query endpoint. They
+ * run when the server advertises `query`, or `changes-query`, which implies
+ * the endpoint, and skip otherwise.
  *
  * The feed carries every record of a Collection, one document per record,
  * discriminated on `kind`: `resource` (a Resource or its tombstone, whatever
@@ -29,6 +31,13 @@
  * shared `feed` Collection keeps exactly the three Resource documents `setup()`
  * wrote.
  */
+import {
+  collectionLogUrl,
+  collectionMetaUrl,
+  collectionQueryUrl,
+  resourceUrl,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
 import {
   ENCRYPTED_COLLECTIONS_IDENTIFIER,
@@ -39,15 +48,17 @@ import { assertWriteStamp } from '../helpers.js'
 
 interface State {
   alice: any
+  spaceUrl: string
   collectionId: string
   changesSupported: boolean
+  querySupported: boolean
   governedSupported: boolean
   queryUrl: () => string
   /**
-   * Absolute URL of a Collection's Metadata object, or of a sub-resource
-   * under it (`log`).
+   * Absolute URL of a Collection's Metadata object, or of its governing
+   * history log (`log`).
    */
-  metaUrl: (collectionId: string, subPath?: string) => string
+  metaUrl: (collectionId: string, subPath?: 'log') => string
   /**
    * Creates a fresh Collection in Alice's Space and returns its id.
    */
@@ -243,16 +254,17 @@ export const changesQueryApi: Suite<State> = {
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
     const collectionId = 'feed'
+    alice.space1 = { id: ctx.generateId() }
+    const spaceUrl = spaceUrlById({
+      baseServerUrl: ctx.serverUrl,
+      spaceId: alice.space1.id
+    })
 
     /** Absolute URL for this Space's `feed` collection query endpoint. */
     function queryUrl(): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/query`,
-        ctx.serverUrl
-      ).toString()
+      return collectionQueryUrl({ spaceUrl, collectionId })
     }
 
-    alice.space1 = { id: ctx.generateId() }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -262,7 +274,7 @@ export const changesQueryApi: Suite<State> = {
       rootClient: alice.rootClient
     })
     await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+      url: spaceUrl,
       method: 'POST',
       action: 'POST',
       json: { id: collectionId, name: 'Feed' }
@@ -270,25 +282,21 @@ export const changesQueryApi: Suite<State> = {
     // Three JSON documents by id; the middle one is then soft-deleted.
     for (const id of ['r1', 'r2', 'r3']) {
       await alice.rootClient.request({
-        url: new URL(
-          `/space/${alice.space1.id}/${collectionId}/${id}`,
-          ctx.serverUrl
-        ).toString(),
+        url: resourceUrl({ spaceUrl, collectionId, resourceId: id }),
         method: 'PUT',
         action: 'PUT',
         json: { id }
       })
     }
     await alice.rootClient.request({
-      url: new URL(
-        `/space/${alice.space1.id}/${collectionId}/r2`,
-        ctx.serverUrl
-      ).toString(),
+      url: resourceUrl({ spaceUrl, collectionId, resourceId: 'r2' }),
       method: 'DELETE'
     })
 
     const features = await serviceFeatures({ serverUrl: ctx.serverUrl })
     const changesSupported = features.includes('changes-query')
+    // A server serving the `changes` profile serves the query endpoint too.
+    const querySupported = features.includes('query') || changesSupported
     const encryptedFeatures = await serviceFeatures({
       serverUrl: ctx.serverUrl,
       specIdentifier: ENCRYPTED_COLLECTIONS_IDENTIFIER
@@ -298,19 +306,18 @@ export const changesQueryApi: Suite<State> = {
     )
 
     /**
-     * Absolute URL of a Collection's Metadata object, or of a sub-resource
-     * under it.
+     * Absolute URL of a Collection's Metadata object, or of its governing
+     * history log.
      *
      * @param targetCollectionId {string}
-     * @param [subPath] {string}   e.g. `log`
+     * @param [subPath] {'log'}
      * @returns {string}
      */
-    function metaUrl(targetCollectionId: string, subPath?: string): string {
-      const suffix = subPath === undefined ? '' : `/${subPath}`
-      return new URL(
-        `/space/${alice.space1.id}/${targetCollectionId}/meta${suffix}`,
-        ctx.serverUrl
-      ).toString()
+    function metaUrl(targetCollectionId: string, subPath?: 'log'): string {
+      const target = { spaceUrl, collectionId: targetCollectionId }
+      return subPath === 'log'
+        ? collectionLogUrl(target)
+        : collectionMetaUrl(target)
     }
 
     /**
@@ -321,7 +328,7 @@ export const changesQueryApi: Suite<State> = {
     async function createCollection(): Promise<string> {
       const id = ctx.generateId()
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: spaceUrl,
         method: 'POST',
         action: 'POST',
         json: { id, name: 'Feed ordering' }
@@ -347,10 +354,11 @@ export const changesQueryApi: Suite<State> = {
       body: unknown
     }): Promise<void> {
       await alice.rootClient.request({
-        url: new URL(
-          `/space/${alice.space1.id}/${targetCollectionId}/${resourceId}`,
-          ctx.serverUrl
-        ).toString(),
+        url: resourceUrl({
+          spaceUrl,
+          collectionId: targetCollectionId,
+          resourceId
+        }),
         method: 'PUT',
         action: 'PUT',
         json: body
@@ -382,10 +390,11 @@ export const changesQueryApi: Suite<State> = {
       headers?: Record<string, string>
     }): Promise<any> {
       return alice.rootClient.request({
-        url: new URL(
-          `/space/${alice.space1.id}/${targetCollectionId}/${resourceId}`,
-          ctx.serverUrl
-        ).toString(),
+        url: resourceUrl({
+          spaceUrl,
+          collectionId: targetCollectionId,
+          resourceId
+        }),
         method: 'PUT',
         action: 'PUT',
         headers: { 'content-type': contentType, ...headers },
@@ -412,10 +421,7 @@ export const changesQueryApi: Suite<State> = {
       limit?: number
     }): Promise<{ documents: any[]; checkpoint: string | null }> {
       const response = await alice.rootClient.request({
-        url: new URL(
-          `/space/${alice.space1.id}/${targetCollectionId}/query`,
-          ctx.serverUrl
-        ).toString(),
+        url: collectionQueryUrl({ spaceUrl, collectionId: targetCollectionId }),
         method: 'POST',
         action: 'POST',
         json: {
@@ -430,8 +436,10 @@ export const changesQueryApi: Suite<State> = {
 
     return {
       alice,
+      spaceUrl,
       collectionId,
       changesSupported,
+      querySupported,
       governedSupported,
       queryUrl,
       metaUrl,
@@ -443,10 +451,10 @@ export const changesQueryApi: Suite<State> = {
   },
 
   teardown: async (ctx, state) => {
-    const { alice } = state
+    const { alice, spaceUrl } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: spaceUrl,
         method: 'DELETE'
       })
     } catch {
@@ -503,7 +511,10 @@ export const changesQueryApi: Suite<State> = {
       name: '[root] rejects an unknown query profile with 501',
       specRefs: ['https://w3id.org/pws#query-profile-registry'],
       run: async (ctx, state) => {
-        const { alice, queryUrl } = state
+        const { alice, queryUrl, querySupported } = state
+        if (!querySupported) {
+          ctx.skip('the service description does not advertise query')
+        }
         let thrown: any
         try {
           await alice.rootClient.request({
@@ -517,9 +528,11 @@ export const changesQueryApi: Suite<State> = {
         }
         assert.ok(thrown, 'expected an unknown profile to be rejected')
         assert.equal(thrown.response.status, 501)
-        assert.match(
-          thrown.response.headers.get('content-type'),
-          /application\/problem\+json/
+        // `application/problem+json` is a SHOULD, so the media type is not
+        // asserted. The `type` member is REQUIRED.
+        assert.equal(
+          thrown.data?.type,
+          'https://w3id.org/pws#unsupported-operation'
         )
       }
     },
@@ -531,7 +544,10 @@ export const changesQueryApi: Suite<State> = {
         'https://w3id.org/pws#invalid-request-body'
       ],
       run: async (ctx, state) => {
-        const { alice, queryUrl } = state
+        const { alice, queryUrl, querySupported } = state
+        if (!querySupported) {
+          ctx.skip('the service description does not advertise query')
+        }
         // The Query Profile Registry marks `profile` REQUIRED: a body that
         // omits it is malformed (`invalid-request-body`, 400), distinct from
         // naming a profile the server does not serve (501).
@@ -874,7 +890,8 @@ export const changesQueryApi: Suite<State> = {
         'and quoted `etag`',
       specRefs: ['https://w3id.org/pws#query-profile-changes'],
       run: async (ctx, state) => {
-        const { alice, changesSupported, collectionId, pullPage } = state
+        const { alice, spaceUrl, changesSupported, collectionId, pullPage } =
+          state
         if (!changesSupported) {
           ctx.skip('the service description does not advertise changes-query')
         }
@@ -885,10 +902,7 @@ export const changesQueryApi: Suite<State> = {
         // A live Resource's `etag` is the one its GET serves.
         const live = resourceDocuments(page).find((doc: any) => doc.id === 'r1')
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/${collectionId}/r1`,
-            ctx.serverUrl
-          ).toString(),
+          url: resourceUrl({ spaceUrl, collectionId, resourceId: 'r1' }),
           method: 'GET'
         })
         assert.equal(live.etag, read.headers.get('etag'))
@@ -903,6 +917,7 @@ export const changesQueryApi: Suite<State> = {
       run: async (ctx, state) => {
         const {
           alice,
+          spaceUrl,
           changesSupported,
           createCollection,
           putBytes,
@@ -952,10 +967,11 @@ export const changesQueryApi: Suite<State> = {
 
         for (const { resourceId } of written) {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/${targetCollectionId}/${resourceId}`,
-              ctx.serverUrl
-            ).toString(),
+            url: resourceUrl({
+              spaceUrl,
+              collectionId: targetCollectionId,
+              resourceId
+            }),
             method: 'DELETE'
           })
         }

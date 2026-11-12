@@ -12,6 +12,10 @@
  * profile's MUSTs are required-tier. `setup()` reads that document; when the
  * token is absent, every test calls `ctx.skip(...)`.
  *
+ * The `codec path` group provisions its Collections with an `edv` descriptor
+ * and key epochs, which needs the OPTIONAL client-side encryption feature too.
+ * Its tests also skip when the PWS `encryption` token is absent.
+ *
  * The stored documents are EDV encrypted-document envelopes whose `indexed`
  * attributes stand in for the client's HMAC-blinded base64url tokens -- the
  * server matches them opaquely, so no real crypto is exercised here. Signed
@@ -35,6 +39,11 @@ import type { Suite } from '../harness/types.js'
 import { ConflictError, PwsClient } from '@interop/pws-client'
 import type { Collection, FindPage, Space } from '@interop/pws-client'
 import {
+  collectionQueryUrl,
+  resourceUrl as resourceUrlOf,
+  spaceUrlById
+} from '@interop/pws-client/paths'
+import {
   createEdvEncryption,
   ensureFirstEpoch,
   ownerRecipient
@@ -53,6 +62,8 @@ interface State {
   alice: any
   bob: any
   advertised: boolean
+  /** Whether the server advertises the PWS `encryption` features token. */
+  encryptionSupported: boolean
   queryUrl: (collectionId: string) => string
   resourceUrl: (collectionId: string, resourceId: string) => string
   /** Set by the `codec path` group setup, when the feature is advertised. */
@@ -154,22 +165,24 @@ export const blindedIndexApi: Suite<State> = {
     // Shallow-clone the shared actors so per-suite scratch fields do not leak.
     const alice: any = { ...ctx.actors.alice }
     const bob: any = { ...ctx.actors.bob }
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
 
     /** Absolute URL for a Collection's reserved `/query` endpoint. */
     function queryUrl(collectionId: string): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/query`,
-        ctx.serverUrl
-      ).toString()
+      return collectionQueryUrl({ spaceUrl: alice.space1.url, collectionId })
     }
 
     /** Absolute URL for a Resource within a Collection. */
     function resourceUrl(collectionId: string, resourceId: string): string {
-      return new URL(
-        `/space/${alice.space1.id}/${collectionId}/${resourceId}`,
-        ctx.serverUrl
-      ).toString()
+      return resourceUrlOf({
+        spaceUrl: alice.space1.url,
+        collectionId,
+        resourceId
+      })
     }
 
     await ctx.createSpace({
@@ -186,6 +199,8 @@ export const blindedIndexApi: Suite<State> = {
       specIdentifier: ENCRYPTED_COLLECTIONS_IDENTIFIER
     })
     const advertised = features.includes('blinded-index-query')
+    const coreFeatures = await serviceFeatures({ serverUrl: ctx.serverUrl })
+    const encryptionSupported = coreFeatures.includes('encryption')
 
     // Seed fixtures only when the feature is supported; otherwise every test
     // skips and nothing needs to be provisioned.
@@ -196,7 +211,7 @@ export const blindedIndexApi: Suite<State> = {
         documents: Array<Record<string, unknown>>
       ): Promise<void> {
         await alice.rootClient.request({
-          url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+          url: alice.space1.url,
           method: 'POST',
           action: 'POST',
           json: { id: collectionId, name: collectionId }
@@ -234,14 +249,21 @@ export const blindedIndexApi: Suite<State> = {
       ])
     }
 
-    return { alice, bob, advertised, queryUrl, resourceUrl }
+    return {
+      alice,
+      bob,
+      advertised,
+      encryptionSupported,
+      queryUrl,
+      resourceUrl
+    }
   },
 
   teardown: async (ctx, state) => {
     const { alice, codec } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'DELETE'
       })
     } catch {
@@ -258,7 +280,7 @@ export const blindedIndexApi: Suite<State> = {
     {
       name: CODEC_GROUP,
       setup: async (ctx, state) => {
-        if (!state.advertised) {
+        if (!state.advertised || !state.encryptionSupported) {
           return
         }
         // A Space of its own, controlled by the encrypting client's DID: the
@@ -510,10 +532,6 @@ export const blindedIndexApi: Suite<State> = {
         }
         assert.ok(neitherError, 'expected a body with neither clause to fail')
         assert.equal(neitherError.response.status, 400)
-        assert.match(
-          neitherError.response.headers.get('content-type'),
-          /application\/problem\+json/
-        )
         assert.equal(
           neitherError.data.type,
           'https://w3id.org/pws#invalid-request-body'
@@ -682,10 +700,6 @@ export const blindedIndexApi: Suite<State> = {
         }
         assert.ok(maskedError, "expected Bob's write to be rejected")
         assert.equal(maskedError.response.status, 404)
-        assert.match(
-          maskedError.response.headers.get('content-type'),
-          /application\/problem\+json/
-        )
         assert.equal(maskedError.data.type, 'https://w3id.org/pws#not-found')
       }
     },
@@ -701,6 +715,9 @@ export const blindedIndexApi: Suite<State> = {
         const { advertised, codec } = state
         if (!advertised) {
           ctx.skip('the server does not advertise blinded-index-query')
+        }
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
         }
         assert.ok(codec, 'expected the codec-path fixtures')
         // The tokens are computed by the client's blinding key, so a match
@@ -724,6 +741,9 @@ export const blindedIndexApi: Suite<State> = {
         const { advertised, codec } = state
         if (!advertised) {
           ctx.skip('the server does not advertise blinded-index-query')
+        }
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
         }
         assert.ok(codec, 'expected the codec-path fixtures')
         // Every document carries the declared attribute, whatever its value.
@@ -751,6 +771,9 @@ export const blindedIndexApi: Suite<State> = {
         const { advertised, codec } = state
         if (!advertised) {
           ctx.skip('the server does not advertise blinded-index-query')
+        }
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
         }
         assert.ok(codec, 'expected the codec-path fixtures')
         // `content.serial` is declared unique, so the codec stamps its blinded

@@ -13,6 +13,7 @@
  * contract too.
  */
 import assert from '../harness/assert.js'
+import { serviceFeatures } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
 
 import { ConflictError, ValidationError } from '@interop/pws-client'
@@ -23,6 +24,8 @@ interface State {
   createdSpaces: Space[]
   newSpace: (name: string) => Promise<Space>
   gdriveRegistration: (id: string) => BackendRegistration
+  /** Whether the server advertises the `backends` feature token. */
+  backendsSupported: boolean
 }
 
 export const clientBackends: Suite<State> = {
@@ -59,7 +62,18 @@ export const clientBackends: Suite<State> = {
       }
     }
 
-    return { alice, createdSpaces, newSpace, gdriveRegistration }
+    // Backends are an OPTIONAL extension, advertised by the `backends`
+    // feature token (spec "Scope and Conformance Profiles"). Every case here
+    // skips on a server that does not advertise it.
+    const features = await serviceFeatures({ serverUrl: ctx.serverUrl })
+
+    return {
+      alice,
+      createdSpaces,
+      newSpace,
+      gdriveRegistration,
+      backendsSupported: features.includes('backends')
+    }
   },
 
   teardown: async (ctx, state) => {
@@ -81,6 +95,9 @@ export const clientBackends: Suite<State> = {
         'https://w3id.org/pws#backend-data-model'
       ],
       run: async (ctx, state) => {
+        if (!state.backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const { newSpace, gdriveRegistration } = state
         const space = await newSpace('Register Backend')
         const descriptor = await space.registerBackend(
@@ -111,18 +128,20 @@ export const clientBackends: Suite<State> = {
     },
     {
       id: 'backend.list-with-default',
-      name: 'lists the registered backend alongside the server default',
+      name: "lists the registered backend alongside the server's own backends",
       specRefs: ['https://w3id.org/pws#space-backends-available'],
       run: async (ctx, state) => {
+        if (!state.backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const { newSpace, gdriveRegistration } = state
         const space = await newSpace('List Backends')
         await space.registerBackend(gdriveRegistration('gdrive-personal'))
         const backends = await space.backends()
         assert.ok(backends)
-        // A server lists its own backends ahead of the registered ones: the
-        // `default` entry, then any under their own ids. How many it runs is
-        // server-specific.
-        assert.ok(backends.some(backend => backend.id === 'default'))
+        // A server lists its own backends beside the registered ones. `default`
+        // is only the conventional id of its default backend (spec "Backend
+        // Data Model"), and how many it runs is server-specific.
         const external = backends.filter(
           backend => backend.managedBy === 'external'
         )
@@ -143,6 +162,9 @@ export const clientBackends: Suite<State> = {
         'https://w3id.org/pws#id-conflict'
       ],
       run: async (ctx, state) => {
+        if (!state.backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const { newSpace, gdriveRegistration } = state
         const space = await newSpace('Duplicate Backend')
         await space.registerBackend(gdriveRegistration('gdrive-personal'))
@@ -160,6 +182,9 @@ export const clientBackends: Suite<State> = {
         'https://w3id.org/pws#backend-data-model'
       ],
       run: async (ctx, state) => {
+        if (!state.backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const { newSpace, gdriveRegistration } = state
         const space = await newSpace('Reserved Backend Id')
         await assert.rejects(
@@ -176,6 +201,9 @@ export const clientBackends: Suite<State> = {
         'https://w3id.org/pws#backend-data-model'
       ],
       run: async (ctx, state) => {
+        if (!state.backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const { newSpace, gdriveRegistration } = state
         const space = await newSpace('Update Backend')
         // PUT to a fresh id creates the record -> 201 + sanitized descriptor.
@@ -199,6 +227,9 @@ export const clientBackends: Suite<State> = {
       name: 'selects a registered backend on a Collection (control plane)',
       specRefs: ['https://w3id.org/pws#collection-backend-selected'],
       run: async (ctx, state) => {
+        if (!state.backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const { newSpace, gdriveRegistration } = state
         const space = await newSpace('Select Backend')
         await space.registerBackend(gdriveRegistration('gdrive-personal'))
@@ -223,6 +254,9 @@ export const clientBackends: Suite<State> = {
         'https://w3id.org/pws#unsupported-backend'
       ],
       run: async (ctx, state) => {
+        if (!state.backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const { newSpace, gdriveRegistration } = state
         const space = await newSpace('Inert Backend')
         await space.registerBackend(gdriveRegistration('gdrive-personal'))
@@ -245,6 +279,9 @@ export const clientBackends: Suite<State> = {
       name: 'deregisters a backend and is idempotent',
       specRefs: ['https://w3id.org/pws#backends'],
       run: async (ctx, state) => {
+        if (!state.backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const { newSpace, gdriveRegistration } = state
         const space = await newSpace('Deregister Backend')
         await space.registerBackend(gdriveRegistration('gdrive-personal'))

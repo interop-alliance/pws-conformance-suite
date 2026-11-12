@@ -5,13 +5,73 @@
  * WAS conformance tests -- Resource API.
  */
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
+import {
+  collectionUrl,
+  resourceMetaUrl,
+  resourcePolicyUrl,
+  resourceUrl as resourceUrlOf,
+  rootCapabilityId,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
-import { assertResourceWriteResponse } from '../helpers.js'
+import { assertResourceWriteResponse, capabilityActionFor } from '../helpers.js'
 import type { Suite } from '../harness/types.js'
 
 interface State {
   alice: any
   bob: any
+  /** Whether the server parses multipart uploads, once probed. */
+  multipart?: boolean
+}
+
+/**
+ * The container URL of the suite's `credentials` Collection.
+ *
+ * @param alice {any}   the suite's root actor
+ * @returns {string}
+ */
+function credentialsUrl(alice: any): string {
+  return collectionUrl({
+    spaceUrl: alice.space1.url,
+    collectionId: 'credentials'
+  })
+}
+
+/**
+ * The URL of a Resource in the suite's `credentials` Collection.
+ *
+ * @param alice {any}   the suite's root actor
+ * @param resourceId {string}
+ * @returns {string}
+ */
+function credentialUrl(alice: any, resourceId: string): string {
+  return resourceUrlOf({
+    spaceUrl: alice.space1.url,
+    collectionId: 'credentials',
+    resourceId
+  })
+}
+
+/**
+ * A Resource URL in a Space that does not exist, for the not-found cases.
+ *
+ * @param options {object}
+ * @param options.serverUrl {string}
+ * @param options.spaceId {string}
+ * @returns {string}
+ */
+function missingResourceUrl({
+  serverUrl,
+  spaceId
+}: {
+  serverUrl: string
+  spaceId: string
+}): string {
+  return resourceUrlOf({
+    spaceUrl: spaceUrlById({ baseServerUrl: serverUrl, spaceId }),
+    collectionId: 'unknown-collection',
+    resourceId: 'unknown-resource'
+  })
 }
 
 /**
@@ -97,6 +157,82 @@ function buildMultipartBody({
   return new TextEncoder().encode(text)
 }
 
+/**
+ * Whether the server parses `multipart/form-data` uploads. Support is
+ * OPTIONAL, and a server without it stores the body as opaque bytes under its
+ * `multipart/form-data` content type. So the probe uploads one valid file
+ * part and reads back the stored content type. A type other than
+ * `multipart/form-data` means the server took the file part's own type, so it
+ * parsed the upload. The probe Resource is deleted afterwards, and the answer
+ * is cached on the suite state.
+ *
+ * @param options {object}
+ * @param options.state {State}
+ * @param options.url {string}   the Collection container URL
+ * @returns {Promise<boolean>}
+ */
+async function multipartSupported({
+  state,
+  url
+}: {
+  state: State
+  url: string
+}): Promise<boolean> {
+  if (state.multipart !== undefined) {
+    return state.multipart
+  }
+  const boundary = '----wasconf-probe'
+  const response = await postMultipart({
+    url,
+    body: buildMultipartBody({
+      boundary,
+      parts: [
+        {
+          name: 'file',
+          filename: 'probe.txt',
+          contentType: 'text/plain',
+          value: 'multipart probe'
+        }
+      ]
+    }),
+    boundary,
+    invocationSigner: state.alice.rootClient.invocationSigner
+  })
+  if (response.status === 415 || response.status === 501) {
+    state.multipart = false
+    return false
+  }
+  assert.ok(
+    response.ok,
+    'a valid single-file multipart upload must be stored (parsed, or as ' +
+      `opaque bytes), got ${response.status}`
+  )
+  const location = response.headers.get('location')
+  assert.ok(location, 'expected a Location header on the probe upload')
+  const storedUrl = new URL(location, url).toString()
+  let supported: boolean
+  try {
+    const head = await state.alice.rootClient.request({
+      url: storedUrl,
+      method: 'HEAD',
+      action: capabilityActionFor('HEAD')
+    })
+    const contentType: string = head.headers.get('content-type') ?? ''
+    supported = !/^multipart\/form-data/i.test(contentType)
+  } finally {
+    try {
+      await state.alice.rootClient.request({
+        url: storedUrl,
+        method: 'DELETE'
+      })
+    } catch {
+      /* best-effort cleanup; teardown deletes the Space */
+    }
+  }
+  state.multipart = supported
+  return supported
+}
+
 export const resourceApi: Suite<State> = {
   id: 'resource-api',
   name: 'Resource API',
@@ -104,7 +240,11 @@ export const resourceApi: Suite<State> = {
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
     const bob: any = { ...ctx.actors.bob }
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -115,7 +255,7 @@ export const resourceApi: Suite<State> = {
     })
     // Pre-create the credentials collection so resource tests can POST/PUT into it
     await alice.rootClient.request({
-      url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+      url: alice.space1.url,
       method: 'POST',
       json: { id: 'credentials', name: 'Verifiable Credentials' }
     })
@@ -126,7 +266,7 @@ export const resourceApi: Suite<State> = {
     const { alice } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'DELETE'
       })
     } catch {
@@ -144,14 +284,10 @@ export const resourceApi: Suite<State> = {
         // Reads no longer 401 at the hook: an anonymous read is allowed to attempt,
         // and is denied as 404 (no-leak) when no access-control policy grants it.
         const response = await fetch(
-          new URL('/space/any-space-id/any-collection/any-resource', serverUrl),
+          missingResourceUrl({ serverUrl, spaceId: 'any-space-id' }),
           { method: 'GET' }
         )
         assert.equal(response.status, 404)
-        assert.match(
-          response.headers.get('content-type')!,
-          /application\/problem\+json/
-        )
       }
     },
     {
@@ -161,10 +297,10 @@ export const resourceApi: Suite<State> = {
       run: async (ctx, state) => {
         const { serverUrl } = ctx
         const { alice } = state
-        const url = new URL(
-          '/space/space-id-that-does-not-exist/unknown-collection/unknown-resource',
-          serverUrl
-        ).toString()
+        const url = missingResourceUrl({
+          serverUrl,
+          spaceId: 'space-id-that-does-not-exist'
+        })
         let expectedError: any
         try {
           await alice.rootClient.request({ url, method: 'GET' })
@@ -172,10 +308,6 @@ export const resourceApi: Suite<State> = {
           expectedError = err
         }
         assert.equal(expectedError.response.status, 404)
-        assert.match(
-          expectedError.response.headers.get('content-type'),
-          /application\/problem\+json/
-        )
       }
     },
     {
@@ -186,17 +318,13 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#read-resource-operation'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
         const body = {
           id: 'sample-resource',
           name: 'Sample Verifiable Credential'
         }
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/credentials/`,
-            serverUrl
-          ).toString(),
+          url: credentialsUrl(alice),
           method: 'POST',
           action: 'POST',
           json: body
@@ -205,12 +333,13 @@ export const resourceApi: Suite<State> = {
         assert.equal(response.data['content-type'], 'application/json')
         assert.match(response.headers.get('content-type'), /application\/json/)
 
-        const resourceUrl = response.headers.get('location')
-        assert.ok(
-          resourceUrl.startsWith(
-            `${serverUrl}/space/${alice.space1.id}/credentials/`
-          )
-        )
+        // `Location` may be absolute or relative; it is compared after
+        // resolving it against the request URL.
+        const resourceUrl = new URL(
+          response.headers.get('location'),
+          credentialsUrl(alice)
+        ).toString()
+        assert.ok(resourceUrl.startsWith(credentialsUrl(alice)))
 
         const fetchResourceResponse = await alice.rootClient.request({
           url: resourceUrl,
@@ -235,20 +364,19 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#content-types-and-representations'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
         const body = new Blob(['line 1\nline2\n'], { type: 'text/plain' })
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/credentials/`,
-            serverUrl
-          ).toString(),
+          url: credentialsUrl(alice),
           method: 'POST',
           body
         })
         assert.equal(response.status, 201)
 
-        const createdUrl = response.headers.get('location')
+        const createdUrl = new URL(
+          response.headers.get('location'),
+          credentialsUrl(alice)
+        ).toString()
         const fetchResourceResponse = await alice.rootClient.request({
           url: createdUrl,
           method: 'GET'
@@ -266,13 +394,9 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#read-resource-operation'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
         const resourceId = 'put-resource'
-        const resourceUrl = new URL(
-          `/space/${alice.space1.id}/credentials/${resourceId}`,
-          serverUrl
-        ).toString()
+        const resourceUrl = credentialUrl(alice, resourceId)
         const body = { id: resourceId, name: 'PUT Resource Test' }
 
         const putResponse = await alice.rootClient.request({
@@ -297,12 +421,12 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#update-or-create-by-id-resource-operation'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
-        const resourceUrl = new URL(
-          `/space/${alice.space1.id}/collection-does-not-exist/some-resource`,
-          serverUrl
-        ).toString()
+        const resourceUrl = resourceUrlOf({
+          spaceUrl: alice.space1.url,
+          collectionId: 'collection-does-not-exist',
+          resourceId: 'some-resource'
+        })
         let expectedError: any
         try {
           await alice.rootClient.request({
@@ -314,10 +438,6 @@ export const resourceApi: Suite<State> = {
           expectedError = err
         }
         assert.equal(expectedError.response.status, 404)
-        assert.match(
-          expectedError.response.headers.get('content-type'),
-          /application\/problem\+json/
-        )
       }
     },
     {
@@ -327,13 +447,9 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#update-or-create-by-id-resource-operation'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
         const resourceId = 'upsert-resource'
-        const resourceUrl = new URL(
-          `/space/${alice.space1.id}/credentials/${resourceId}`,
-          serverUrl
-        ).toString()
+        const resourceUrl = credentialUrl(alice, resourceId)
 
         await alice.rootClient.request({
           url: resourceUrl,
@@ -361,22 +477,21 @@ export const resourceApi: Suite<State> = {
       name: "[root] Bob should not be able to GET Alice's resources",
       specRefs: ['https://w3id.org/pws#read-resource-operation'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice, bob } = state
         const body = {
           id: 'alice-private-resource',
           name: 'Alice Private Resource'
         }
         const postResponse = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/credentials/`,
-            serverUrl
-          ).toString(),
+          url: credentialsUrl(alice),
           method: 'POST',
           json: body
         })
         assert.equal(postResponse.status, 201)
-        const resourceUrl = postResponse.headers.get('location')
+        const resourceUrl = new URL(
+          postResponse.headers.get('location'),
+          credentialsUrl(alice)
+        ).toString()
 
         let expectedError: any
         try {
@@ -386,10 +501,6 @@ export const resourceApi: Suite<State> = {
         }
         // Bob gets a 404, not a 403, to avoid revealing the resource's existence
         assert.equal(expectedError.response.status, 404)
-        assert.match(
-          expectedError.response.headers.get('content-type'),
-          /application\/problem\+json/
-        )
 
         await alice.rootClient.request({ url: resourceUrl, method: 'DELETE' })
       }
@@ -399,22 +510,23 @@ export const resourceApi: Suite<State> = {
       name: '[root] GET Resource Metadata (/meta), or skip if unimplemented',
       specRefs: ['https://w3id.org/pws#read-resource-metadata-operation'],
       run: async (ctx, state) => {
-        const { serverUrl, generateId } = ctx
+        const { generateId } = ctx
         const { alice } = state
         // Resource Metadata is OPTIONAL: a server that does not implement it
         // responds 501 `unsupported-operation`, which this test treats as a skip.
         const resourceId = generateId()
-        const resourceUrl = new URL(
-          `/space/${alice.space1.id}/credentials/${resourceId}`,
-          serverUrl
-        ).toString()
+        const resourceUrl = credentialUrl(alice, resourceId)
         await alice.rootClient.request({
           url: resourceUrl,
           method: 'PUT',
           json: { id: resourceId, name: 'Metadata Resource' }
         })
 
-        const metaUrl = `${resourceUrl}/meta`
+        const metaUrl = resourceMetaUrl({
+          spaceUrl: alice.space1.url,
+          collectionId: 'credentials',
+          resourceId
+        })
         let response: any
         try {
           response = await alice.rootClient.request({
@@ -437,13 +549,9 @@ export const resourceApi: Suite<State> = {
           'size should be a positive integer'
         )
 
-        // An anonymous (unsigned) meta read must not leak existence: 404 problem+json.
-        const anonResponse = await fetch(new URL(metaUrl))
+        // An anonymous (unsigned) meta read must not leak existence: 404.
+        const anonResponse = await fetch(metaUrl)
         assert.equal(anonResponse.status, 404)
-        assert.match(
-          anonResponse.headers.get('content-type')!,
-          /application\/problem\+json/
-        )
       }
     },
     {
@@ -455,28 +563,89 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#content-types-and-representations'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
         // 'line 1\nline2\n' is exactly 13 bytes.
         const body = new Blob(['line 1\nline2\n'], { type: 'text/plain' })
         const postResponse = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/credentials/`,
-            serverUrl
-          ).toString(),
+          url: credentialsUrl(alice),
           method: 'POST',
           body
         })
         assert.equal(postResponse.status, 201)
-        const resourceUrl = postResponse.headers.get('location')
+        const resourceUrl = new URL(
+          postResponse.headers.get('location'),
+          credentialsUrl(alice)
+        ).toString()
 
         const headResponse = await alice.rootClient.request({
           url: resourceUrl,
-          method: 'HEAD'
+          method: 'HEAD',
+          action: capabilityActionFor('HEAD')
         })
         assert.equal(headResponse.status, 200)
         assert.match(headResponse.headers.get('content-type'), /text\/plain/)
         assert.equal(headResponse.headers.get('content-length'), '13')
+        // HEAD carries no body.
+        assert.equal(await headResponse.text(), '')
+      }
+    },
+    {
+      id: 'head.delegated-get-grant',
+      name: '[delegated] a GET-only grant authorizes a HEAD signed with the GET action',
+      group: 'HEAD Resource',
+      specRefs: ['https://w3id.org/pws/authz-profile#get-action'],
+      run: async (ctx, state) => {
+        const { generateId, actors } = ctx
+        const { alice } = state
+        const { aliceDelegatedApp } = actors
+        const resourceId = generateId()
+        const resourceUrl = credentialUrl(alice, resourceId)
+        const putResponse = await alice.rootClient.request({
+          url: resourceUrl,
+          method: 'PUT',
+          // Plain text: the client would parse a JSON HEAD body and fail on it.
+          body: new Blob(['line 1\nline2\n'], { type: 'text/plain' })
+        })
+        assert.ok(putResponse.ok, `PUT failed with ${putResponse.status}`)
+
+        // Rooted at the Space, as the Space's root capability id is minted
+        // from its canonical URL.
+        const capability = await alice.rootClient.delegate({
+          capability: rootCapabilityId(alice.space1.url),
+          allowedActions: ['GET'],
+          invocationTarget: resourceUrl,
+          controller: aliceDelegatedApp.did
+        })
+        const appClient = ctx.zcapClient({ signer: aliceDelegatedApp.signer })
+
+        const getResponse = await appClient.request({
+          url: resourceUrl,
+          method: 'GET',
+          action: capabilityActionFor('GET'),
+          capability
+        })
+        assert.equal(getResponse.status, 200)
+        const getBytes = await getResponse.arrayBuffer()
+
+        const headResponse = await appClient.request({
+          url: resourceUrl,
+          method: 'HEAD',
+          action: capabilityActionFor('HEAD'),
+          capability
+        })
+        assert.equal(headResponse.status, 200)
+        assert.equal(
+          headResponse.headers.get('content-type'),
+          getResponse.headers.get('content-type')
+        )
+        assert.equal(
+          headResponse.headers.get('content-length'),
+          String(getBytes.byteLength)
+        )
+        const getEtag = getResponse.headers.get('etag')
+        if (getEtag !== null) {
+          assert.equal(headResponse.headers.get('etag'), getEtag)
+        }
         // HEAD carries no body.
         assert.equal(await headResponse.text(), '')
       }
@@ -487,20 +656,17 @@ export const resourceApi: Suite<State> = {
       group: 'HEAD Resource',
       specRefs: ['https://w3id.org/pws#read-resource-operation'],
       run: async (ctx, state) => {
-        const { serverUrl, generateId } = ctx
+        const { generateId } = ctx
         const { alice } = state
         const resourceId = generateId()
-        const resourceUrl = new URL(
-          `/space/${alice.space1.id}/credentials/${resourceId}`,
-          serverUrl
-        ).toString()
+        const resourceUrl = credentialUrl(alice, resourceId)
         await alice.rootClient.request({
           url: resourceUrl,
           method: 'PUT',
           json: { id: resourceId, name: 'Private HEAD Resource' }
         })
 
-        const response = await fetch(new URL(resourceUrl), { method: 'HEAD' })
+        const response = await fetch(resourceUrl, { method: 'HEAD' })
         assert.equal(response.status, 404)
       }
     },
@@ -513,13 +679,10 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#content-types-and-representations'
       ],
       run: async (ctx, state) => {
-        const { serverUrl, generateId } = ctx
+        const { generateId } = ctx
         const { alice } = state
         const resourceId = generateId()
-        const resourceUrl = new URL(
-          `/space/${alice.space1.id}/credentials/${resourceId}`,
-          serverUrl
-        ).toString()
+        const resourceUrl = credentialUrl(alice, resourceId)
         await alice.rootClient.request({
           url: resourceUrl,
           method: 'PUT',
@@ -527,7 +690,11 @@ export const resourceApi: Suite<State> = {
         })
         // Grant public read at the resource level.
         await alice.rootClient.request({
-          url: `${resourceUrl}/policy`,
+          url: resourcePolicyUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'credentials',
+            resourceId
+          }),
           method: 'PUT',
           json: { type: 'PublicCanRead' }
         })
@@ -535,11 +702,11 @@ export const resourceApi: Suite<State> = {
         // The HEAD Content-Type/Content-Length must match what a GET returns
         // (spec "Content Types and Representations": both correspond to the
         // Metadata `contentType`/`size`).
-        const getResponse = await fetch(new URL(resourceUrl))
+        const getResponse = await fetch(resourceUrl)
         assert.equal(getResponse.status, 200)
         const getBytes = await getResponse.arrayBuffer()
 
-        const headResponse = await fetch(new URL(resourceUrl), {
+        const headResponse = await fetch(resourceUrl, {
           method: 'HEAD'
         })
         assert.equal(headResponse.status, 200)
@@ -555,7 +722,11 @@ export const resourceApi: Suite<State> = {
 
         // Cleanup: revoke the resource policy.
         await alice.rootClient.request({
-          url: `${resourceUrl}/policy`,
+          url: resourcePolicyUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'credentials',
+            resourceId
+          }),
           method: 'DELETE'
         })
       }
@@ -568,14 +739,10 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#delete-resource-operation'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
         const body = { id: 'sample-resource-to-delete', name: 'Sample Delete' }
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/credentials/`,
-            serverUrl
-          ).toString(),
+          url: credentialsUrl(alice),
           method: 'POST',
           json: body
         })
@@ -583,12 +750,13 @@ export const resourceApi: Suite<State> = {
         assert.equal(response.data['content-type'], 'application/json')
         assert.match(response.headers.get('content-type'), /application\/json/)
 
-        const resourceUrl = response.headers.get('location')
-        assert.ok(
-          resourceUrl.startsWith(
-            `${serverUrl}/space/${alice.space1.id}/credentials/`
-          )
-        )
+        // `Location` may be absolute or relative; it is compared after
+        // resolving it against the request URL.
+        const resourceUrl = new URL(
+          response.headers.get('location'),
+          credentialsUrl(alice)
+        ).toString()
+        assert.ok(resourceUrl.startsWith(credentialsUrl(alice)))
 
         const fetchResourceResponse = await alice.rootClient.request({
           url: resourceUrl,
@@ -621,15 +789,14 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#invalid-request-body'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
         // Multipart upload support is OPTIONAL; where offered, a write targets a
         // single Resource, so a body with no file part MUST be rejected. A
-        // server that does not accept multipart at all is treated as a skip.
-        const url = new URL(
-          `/space/${alice.space1.id}/credentials/`,
-          serverUrl
-        ).toString()
+        // server that does not parse multipart uploads is treated as a skip.
+        const url = credentialsUrl(alice)
+        if (!(await multipartSupported({ state, url }))) {
+          ctx.skip('server does not parse multipart uploads')
+        }
         const boundary = '----wasconf-zero-parts'
         const body = buildMultipartBody({
           boundary,
@@ -641,14 +808,7 @@ export const resourceApi: Suite<State> = {
           boundary,
           invocationSigner: alice.rootClient.invocationSigner
         })
-        if (response.status === 415 || response.status === 501) {
-          ctx.skip('server does not accept multipart uploads')
-        }
         assert.equal(response.status, 400)
-        assert.match(
-          response.headers.get('content-type') ?? '',
-          /application\/problem\+json/
-        )
         const problem: any = await response.json()
         assert.equal(problem.type, 'https://w3id.org/pws#invalid-request-body')
       }
@@ -663,12 +823,11 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#invalid-request-body'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
         const { alice } = state
-        const url = new URL(
-          `/space/${alice.space1.id}/credentials/`,
-          serverUrl
-        ).toString()
+        const url = credentialsUrl(alice)
+        if (!(await multipartSupported({ state, url }))) {
+          ctx.skip('server does not parse multipart uploads')
+        }
         const boundary = '----wasconf-two-parts'
         const body = buildMultipartBody({
           boundary,
@@ -693,14 +852,7 @@ export const resourceApi: Suite<State> = {
           boundary,
           invocationSigner: alice.rootClient.invocationSigner
         })
-        if (response.status === 415 || response.status === 501) {
-          ctx.skip('server does not accept multipart uploads')
-        }
         assert.equal(response.status, 400)
-        assert.match(
-          response.headers.get('content-type') ?? '',
-          /application\/problem\+json/
-        )
         const problem: any = await response.json()
         assert.equal(problem.type, 'https://w3id.org/pws#invalid-request-body')
       }
@@ -712,16 +864,13 @@ export const resourceApi: Suite<State> = {
         'never 406',
       specRefs: ['https://w3id.org/pws#content-types-and-representations'],
       run: async (ctx, state) => {
-        const { serverUrl, generateId } = ctx
+        const { generateId } = ctx
         const { alice } = state
         // A Resource has exactly one stored representation; the Accept header is
         // advisory. A server MUST NOT reject a read for lack of an acceptable
         // representation -- the stored representation is always the answer.
         const resourceId = generateId()
-        const resourceUrl = new URL(
-          `/space/${alice.space1.id}/credentials/${resourceId}`,
-          serverUrl
-        ).toString()
+        const resourceUrl = credentialUrl(alice, resourceId)
         await alice.rootClient.request({
           url: resourceUrl,
           method: 'PUT',
@@ -748,21 +897,22 @@ export const resourceApi: Suite<State> = {
         'https://w3id.org/pws#resource-metadata-data-model'
       ],
       run: async (ctx, state) => {
-        const { serverUrl, generateId } = ctx
+        const { generateId } = ctx
         const { alice } = state
         // Resource Metadata is OPTIONAL: a server that does not implement it
         // responds 501 `unsupported-operation`, which this test treats as a skip.
         const resourceId = generateId()
-        const resourceUrl = new URL(
-          `/space/${alice.space1.id}/credentials/${resourceId}`,
-          serverUrl
-        ).toString()
+        const resourceUrl = credentialUrl(alice, resourceId)
         await alice.rootClient.request({
           url: resourceUrl,
           method: 'PUT',
           json: { id: resourceId, name: 'Metadata Resource' }
         })
-        const metaUrl = `${resourceUrl}/meta`
+        const metaUrl = resourceMetaUrl({
+          spaceUrl: alice.space1.url,
+          collectionId: 'credentials',
+          resourceId
+        })
 
         // Read the server-managed metadata first (skips if /meta is 501).
         let before: any

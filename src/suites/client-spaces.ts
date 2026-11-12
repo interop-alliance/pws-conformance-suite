@@ -10,22 +10,124 @@
  * client repo can stay free of any dependency on this server.
  */
 import assert from '../harness/assert.js'
+import { serviceFeatures } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
 import {
+  assertResolvesTo,
   checkBackendsMember,
+  withoutContainerUrls,
   withoutCreatingStamp,
   withoutReplicas,
   withoutWriteStamp
 } from '../helpers.js'
 
 import { NotFoundError } from '@interop/pws-client'
-import type { Space } from '@interop/pws-client'
+import type {
+  BackendDescriptor,
+  BackendUsage,
+  Space
+} from '@interop/pws-client'
+import {
+  collectionLinksetUrl,
+  collectionMetaUrl,
+  collectionUrl,
+  spaceLinksetUrl,
+  spaceMetaUrl,
+  spacesRepositoryUrl
+} from '@interop/pws-client/paths'
 
 interface State {
   alice: any
   createdSpaces: Space[]
   newSpace: (name: string) => Promise<Space>
   space: Space
+  /** Whether the server advertises the `backends` feature token. */
+  backendsSupported: boolean
+  /** Whether the server advertises the `quotas` feature token. */
+  quotasSupported: boolean
+}
+
+/**
+ * Asserts a Backend description object has the shape the spec defines (spec
+ * "Backend Data Model"). Only `id` is required. `name`, `managedBy` and
+ * `persistence` are optional, and `managedBy` and `persistence` take the
+ * defaults `server` and `durable` when absent.
+ *
+ * @param backend {BackendDescriptor}
+ */
+function assertBackendDescriptor(backend: BackendDescriptor): void {
+  assert.ok(
+    typeof backend.id === 'string' && backend.id.length > 0,
+    'a backend carries a non-empty `id`'
+  )
+  if (backend.name !== undefined) {
+    assert.equal(typeof backend.name, 'string', '`name` must be a string')
+  }
+  if (backend.managedBy !== undefined) {
+    assert.ok(
+      ['server', 'external'].includes(backend.managedBy),
+      `unexpected \`managedBy\` ${backend.managedBy}`
+    )
+  }
+  if (backend.persistence !== undefined) {
+    assert.ok(
+      ['durable', 'volatile'].includes(backend.persistence),
+      `unexpected \`persistence\` ${backend.persistence}`
+    )
+  }
+}
+
+/**
+ * Asserts a quota report entry has the members the spec lists for it (spec
+ * "Quotas"). The values a backend reports (its state, its limit, the actions
+ * it restricts) are its own, so only their shape is checked. `name` comes from
+ * the backend's description, where it is optional.
+ *
+ * @param entry {BackendUsage}
+ */
+function assertQuotaEntry(entry: BackendUsage): void {
+  assert.ok(
+    typeof entry.id === 'string' && entry.id.length > 0,
+    'a quota entry carries a non-empty `id`'
+  )
+  if (entry.name !== undefined) {
+    assert.equal(typeof entry.name, 'string', '`name` must be a string')
+  }
+  assert.ok(
+    ['server', 'external'].includes(entry.managedBy),
+    `unexpected \`managedBy\` ${entry.managedBy}`
+  )
+  assert.ok(
+    ['ok', 'near-limit', 'over-quota', 'unreachable'].includes(entry.state),
+    `unexpected \`state\` ${entry.state}`
+  )
+  assert.ok(
+    Number.isInteger(entry.usageBytes) && entry.usageBytes >= 0,
+    '`usageBytes` must be a non-negative integer'
+  )
+  assert.ok(
+    entry.limit && typeof entry.limit === 'object',
+    '`limit` must be an object'
+  )
+  assert.equal(typeof entry.limit.isUnlimited, 'boolean')
+  if (!entry.limit.isUnlimited) {
+    assert.ok(
+      Number.isInteger(entry.limit.capacityBytes) &&
+        (entry.limit.capacityBytes as number) >= 0,
+      'a limited backend reports `capacityBytes`'
+    )
+  }
+  assert.ok(
+    Array.isArray(entry.restrictedActions),
+    '`restrictedActions` must be an array'
+  )
+  for (const action of entry.restrictedActions) {
+    assert.ok(
+      ['GET', 'POST', 'PUT', 'DELETE'].includes(action),
+      `unexpected restricted action ${action}`
+    )
+  }
+  assert.match(entry.measuredAt, /^\d{4}-\d{2}-\d{2}T/)
 }
 
 export const clientSpaces: Suite<State> = {
@@ -45,7 +147,18 @@ export const clientSpaces: Suite<State> = {
       return space
     }
 
-    return { alice, createdSpaces, newSpace, space: undefined as any }
+    // Backends and quotas are OPTIONAL extensions, each advertised by its
+    // own feature token (spec "Scope and Conformance Profiles").
+    const features = await serviceFeatures({ serverUrl: ctx.serverUrl })
+
+    return {
+      alice,
+      createdSpaces,
+      newSpace,
+      space: undefined as any,
+      backendsSupported: features.includes('backends'),
+      quotasSupported: features.includes('quotas')
+    }
   },
 
   teardown: async (ctx, state) => {
@@ -101,17 +214,27 @@ export const clientSpaces: Suite<State> = {
           readListing: () => space.backends()
         })
         // A Space is a container, so its `url` carries the canonical
-        // trailing slash (spec "Space Metadata Data Model"). The write stamp
+        // trailing slash (spec "Space Metadata Data Model"). It and `linkset`
+        // are resolved against the Metadata object's URL. The write stamp
         // members are checked for shape, not exact value.
         assert.deepStrictEqual(
-          withoutCreatedBy(withoutReplicas(withoutWriteStamp(rest))),
+          withoutCreatedBy(
+            withoutReplicas(
+              withoutWriteStamp(
+                withoutContainerUrls({
+                  value: rest,
+                  base: spaceMetaUrl({ spaceUrl: space.url }),
+                  containerUrl: space.url,
+                  linksetUrl: spaceLinksetUrl({ spaceUrl: space.url })
+                })
+              )
+            )
+          ),
           {
             id: space.id,
             type: ['Space'],
             name: 'Home',
-            controller: alice.did,
-            url: `/space/${space.id}/`,
-            linkset: `/space/${space.id}/linkset`
+            controller: alice.did
           }
         )
       }
@@ -164,19 +287,34 @@ export const clientSpaces: Suite<State> = {
         const { alice, newSpace } = state
         // A persistent external server may hold other spaces for Alice from
         // earlier runs, so assert containment rather than exact contents.
+        // The client follows every `next` link, and the `totalItems` it
+        // reports is its own count, so neither is a server claim to check.
         const space = await newSpace('Listed Space')
         const listing = await alice.pws.listSpaces()
-        assert.equal(listing.url, '/spaces/')
-        assert.equal(listing.totalItems, listing.items.length)
-        assert.deepStrictEqual(
-          listing.items.find((item: { id: string }) => item.id === space.id),
-          {
-            id: space.id,
-            type: ['Space'],
-            name: 'Listed Space',
-            url: `/space/${space.id}/`
-          }
+        const spacesUrl = spacesRepositoryUrl({ baseServerUrl: ctx.serverUrl })
+        assertResolvesTo({
+          value: listing.url,
+          base: spacesUrl,
+          expected: spacesUrl,
+          label: 'the listing `url`'
+        })
+        const item = listing.items.find(
+          (candidate: { id: string }) => candidate.id === space.id
         )
+        assert.ok(item, 'the listing includes the created Space')
+        // Each item MUST carry `id`, `url`, and `type` (spec "List Spaces
+        // Operation"). Other members are not required, and `name`, when a
+        // server lists it, is the Space's name.
+        assert.deepStrictEqual(item.type, ['Space'])
+        assertResolvesTo({
+          value: item.url,
+          base: spacesUrl,
+          expected: space.url,
+          label: 'the listed Space `url`'
+        })
+        if (item.name !== undefined) {
+          assert.equal(item.name, 'Listed Space')
+        }
       }
     },
     {
@@ -222,23 +360,42 @@ export const clientSpaces: Suite<State> = {
         })
         assert.equal(collection.id, 'credentials')
         // A Collection is a container too, so its `url` also carries the
-        // canonical trailing slash. `createdAt` and the write stamp
-        // (`updatedAt`, `updatedAtCounter`, `originId`) are dynamic, so they
-        // are checked for shape, not exact value. `etag` is a client-side
-        // convenience the wire body never carries (spec: the validator is
-        // surfaced only as the `ETag` header).
-        const described = withoutCreatingStamp(
-          withoutWriteStamp(withoutCreatedBy(await collection.describe()))
-        )
-        const { createdAt, etag: _etag, ...rest } = described
-        assert.match(createdAt as string, /^\d{4}-\d{2}-\d{2}T/)
+        // canonical trailing slash. It and `linkset` are resolved against the
+        // Metadata object's URL. The write stamp (`updatedAt`,
+        // `updatedAtCounter`, `originId`) is dynamic, so it is checked for
+        // shape, not exact value. `createdAt` is OPTIONAL and checked when
+        // present. `etag` is a client-side convenience the wire body never
+        // carries (spec: the validator is surfaced only as the `ETag` header).
+        const described = withoutContainerUrls({
+          value: withoutCreatingStamp(
+            withoutWriteStamp(withoutCreatedBy(await collection.describe()))
+          ),
+          base: collectionMetaUrl({
+            spaceUrl: space.url,
+            collectionId: 'credentials'
+          }),
+          containerUrl: collectionUrl({
+            spaceUrl: space.url,
+            collectionId: 'credentials'
+          }),
+          linksetUrl: collectionLinksetUrl({
+            spaceUrl: space.url,
+            collectionId: 'credentials'
+          })
+        })
+        const { createdAt, etag: _etag, backend, ...rest } = described
+        if (createdAt !== undefined) {
+          assert.match(createdAt as string, /^\d{4}-\d{2}-\d{2}T/)
+        }
+        // `backend` is OPTIONAL, and a Collection created without one has the
+        // `default` backend (spec "Collection Metadata Data Model").
+        if (backend !== undefined) {
+          assert.deepStrictEqual(backend, { id: 'default' })
+        }
         assert.deepStrictEqual(rest, {
           id: 'credentials',
           type: ['Collection'],
-          name: 'Verifiable Credentials',
-          backend: { id: 'default' },
-          url: `/space/${space.id}/credentials/`,
-          linkset: `/space/${space.id}/credentials/linkset`
+          name: 'Verifiable Credentials'
         })
       }
     },
@@ -278,19 +435,18 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#collection-backend-selected'],
       run: async (ctx, state) => {
-        const { space } = state
+        const { space, backendsSupported } = state
+        if (!backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const collection = await space.createCollection({ id: 'backend-probe' })
         const backend = await collection.backend()
         assert.ok(backend)
-        // The display name is server-specific (e.g. 'Server Filesystem' or
-        // 'Server PostgreSQL'); the suite runs against any conforming server.
-        const { name, ...rest } = backend
-        assert.ok(typeof name === 'string' && name.length > 0)
-        assert.deepStrictEqual(rest, {
-          id: 'default',
-          managedBy: 'server',
-          persistence: 'durable'
-        })
+        // A Collection created without a `backend` has the `default` one
+        // (spec "Collection Backend Selected"). The other members of its
+        // description are optional, and their values are server-specific.
+        assertBackendDescriptor(backend)
+        assert.equal(backend.id, 'default')
       }
     },
     {
@@ -300,7 +456,10 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#collection-backend-selected'],
       run: async (ctx, state) => {
-        const { space } = state
+        const { space, backendsSupported } = state
+        if (!backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const missing = space.collection('no-such-collection')
         assert.equal(await missing.backend(), null)
       }
@@ -312,27 +471,29 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#quotas'],
       run: async (ctx, state) => {
-        const { space } = state
+        const { space, backendsSupported, quotasSupported } = state
+        if (!quotasSupported) {
+          ctx.skip('the service description does not advertise quotas')
+        }
         const collection = await space.createCollection({ id: 'quota-probe' })
         await collection.add({ hello: 'world' })
         const usage = await collection.quota()
         assert.ok(usage)
-        // The report names the backend by an id from the Space's backends
-        // listing. A server may list its default backend under `default`
-        // alone or also under a fixed id of its own, and report either.
-        const backends = await space.backends()
-        assert.ok(backends)
-        assert.ok(
-          backends.some(backend => backend.id === usage.id),
-          `backend ${usage.id} is not in the Space's backends listing`
-        )
-        assert.equal(usage.managedBy, 'server')
-        assert.equal(usage.state, 'ok')
+        assertQuotaEntry(usage)
         assert.ok(usage.usageBytes > 0, 'expected non-zero collection usage')
-        // The default filesystem backend has no configured capacity (unlimited).
-        assert.deepStrictEqual(usage.limit, { isUnlimited: true })
-        assert.deepStrictEqual(usage.restrictedActions, [])
-        assert.match(usage.measuredAt, /^\d{4}-\d{2}-\d{2}T/)
+        // On a server with pluggable backends, the report names the backend
+        // by an id from the Space's backends listing, and carries that
+        // backend's `managedBy` (`server` when the description omits it).
+        if (backendsSupported) {
+          const backends = await space.backends()
+          assert.ok(backends)
+          const listed = backends.find(backend => backend.id === usage.id)
+          assert.ok(
+            listed,
+            `backend ${usage.id} is not in the Space's backends listing`
+          )
+          assert.equal(usage.managedBy, listed.managedBy ?? 'server')
+        }
         // The per-collection report is the whole report -- no nested breakdown.
         assert.equal(usage.usageByCollection, undefined)
       }
@@ -344,7 +505,10 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#quotas'],
       run: async (ctx, state) => {
-        const { space } = state
+        const { space, quotasSupported } = state
+        if (!quotasSupported) {
+          ctx.skip('the service description does not advertise quotas')
+        }
         const missing = space.collection('no-such-collection')
         assert.equal(await missing.quota(), null)
       }
@@ -356,24 +520,19 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#space-backends-available'],
       run: async (ctx, state) => {
-        const { space } = state
+        const { space, backendsSupported } = state
+        if (!backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         const backends = await space.backends()
         assert.ok(backends)
-        // A fresh Space lists only the server's own backends: the `default`
-        // entry and, on a server that runs several, each under a fixed id.
-        // How many there are and their display names (e.g. 'Server
-        // Filesystem' or 'Server PostgreSQL') are server-specific; the suite
-        // runs against any conforming server.
+        // A Space with a Collection lists at least the backend that Collection
+        // is on. `default` is only the conventional id of the server's
+        // default backend, and how many backends a server runs, and how it
+        // describes them, are server-specific.
         assert.ok(backends.length >= 1)
-        assert.ok(backends.some(backend => backend.id === 'default'))
         for (const backend of backends) {
-          const { id, name, ...rest } = backend
-          assert.ok(typeof id === 'string' && id.length > 0)
-          assert.ok(typeof name === 'string' && name.length > 0)
-          assert.deepStrictEqual(rest, {
-            managedBy: 'server',
-            persistence: 'durable'
-          })
+          assertBackendDescriptor(backend)
         }
       }
     },
@@ -384,7 +543,10 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#space-backends-available'],
       run: async (ctx, state) => {
-        const { alice } = state
+        const { alice, backendsSupported } = state
+        if (!backendsSupported) {
+          ctx.skip('the service description does not advertise backends')
+        }
         assert.equal(await alice.pws.space('no-such-space').backends(), null)
       }
     },
@@ -395,35 +557,41 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#quotas'],
       run: async (ctx, state) => {
-        const { space } = state
+        const { space, backendsSupported, quotasSupported } = state
+        if (!quotasSupported) {
+          ctx.skip('the service description does not advertise quotas')
+        }
         const report = await space.quotas()
         assert.ok(report)
         assert.match(report.respondedAt, /^\d{4}-\d{2}-\d{2}T/)
-        // One entry per server backend holding this Space's data. The Space
-        // has written to its default backend only, and the entry names it by
-        // an id from the backends listing (`default`, or a server's own fixed
-        // id for it).
-        assert.equal(report.backends.length, 1)
-        const entry = report.backends[0]
-        assert.ok(entry)
-        const backends = await space.backends()
-        assert.ok(backends)
+        // One entry per backend. The spec does not say whether a backend that
+        // holds none of this Space's data is listed, so only the entries'
+        // shape is checked, plus non-zero usage somewhere, since the Space
+        // has written a Resource.
+        assert.ok(Array.isArray(report.backends))
+        assert.ok(report.backends.length >= 1)
+        for (const entry of report.backends) {
+          assertQuotaEntry(entry)
+          // The per-Collection breakdown is opt-in (spec
+          // `?include=collections`), so a bare report omits it.
+          assert.equal(entry.usageByCollection, undefined)
+        }
         assert.ok(
-          backends.some(backend => backend.id === entry.id),
-          `backend ${entry.id} is not in the Space's backends listing`
+          report.backends.some(entry => entry.usageBytes > 0),
+          'expected non-zero usage'
         )
-        // Server-specific display name; just require one.
-        assert.ok(typeof entry.name === 'string' && entry.name.length > 0)
-        assert.equal(entry.managedBy, 'server')
-        assert.equal(entry.state, 'ok')
-        assert.ok(entry.usageBytes > 0, 'expected non-zero usage')
-        // The default filesystem backend has no configured capacity (unlimited).
-        assert.deepStrictEqual(entry.limit, { isUnlimited: true })
-        assert.deepStrictEqual(entry.restrictedActions, [])
-        assert.match(entry.measuredAt, /^\d{4}-\d{2}-\d{2}T/)
-        // The per-Collection breakdown is opt-in (spec `?include=collections`), so
-        // a bare report omits it.
-        assert.equal(entry.usageByCollection, undefined)
+        // On a server with pluggable backends, each entry names a backend
+        // from the Space's backends listing.
+        if (backendsSupported) {
+          const backends = await space.backends()
+          assert.ok(backends)
+          for (const entry of report.backends) {
+            assert.ok(
+              backends.some(backend => backend.id === entry.id),
+              `backend ${entry.id} is not in the Space's backends listing`
+            )
+          }
+        }
       }
     },
     {
@@ -433,16 +601,25 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#quotas'],
       run: async (ctx, state) => {
-        const { space } = state
+        const { space, quotasSupported } = state
+        if (!quotasSupported) {
+          ctx.skip('the service description does not advertise quotas')
+        }
         const report = await space.quotas({ includeCollections: true })
         assert.ok(report)
-        const entry = report.backends[0]
-        assert.ok(entry)
-        // With the opt-in, the space-level report carries a per-collection breakdown.
-        const breakdown = entry.usageByCollection
-        assert.ok(breakdown, 'expected a usageByCollection breakdown')
+        assert.ok(report.backends.length >= 1)
+        // With the opt-in, each backend entry carries a per-collection
+        // breakdown, and the `docs` collection appears in one of them.
+        for (const entry of report.backends) {
+          assert.ok(
+            Array.isArray(entry.usageByCollection),
+            `expected a usageByCollection breakdown on backend ${entry.id}`
+          )
+        }
         assert.ok(
-          breakdown.some(item => item.id === 'docs'),
+          report.backends.some(entry =>
+            entry.usageByCollection!.some(item => item.id === 'docs')
+          ),
           'expected the docs collection in the breakdown'
         )
       }
@@ -454,7 +631,10 @@ export const clientSpaces: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#quotas'],
       run: async (ctx, state) => {
-        const { alice } = state
+        const { alice, quotasSupported } = state
+        if (!quotasSupported) {
+          ctx.skip('the service description does not advertise quotas')
+        }
         assert.equal(await alice.pws.space('no-such-space').quotas(), null)
       }
     }

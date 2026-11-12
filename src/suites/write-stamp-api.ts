@@ -22,6 +22,14 @@
  * tests compare it only for equality. It is a quoted strong validator, and it
  * moves on every write, including a write of an identical body.
  */
+import {
+  collectionMetaUrl,
+  collectionQueryUrl,
+  resourceMetaUrl,
+  resourceUrl as resourceUrlOf,
+  spaceMetaUrl,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
 import {
   PWS_SPEC_IDENTIFIER,
@@ -34,12 +42,14 @@ import { assertWriteStamp } from '../helpers.js'
 interface State {
   alice: any
   spaceId: string
+  spaceUrl: string
   collectionId: string
   metadataSupported: boolean
   changesSupported: boolean
   spaceMetaUrl: string
   collectionMetaUrl: string
   resourceUrl: (id: string) => string
+  resourceMetaUrl: (id: string) => string
   queryUrl: string
 }
 
@@ -168,6 +178,7 @@ export const writeStampApi: Suite<State> = {
     const alice: any = { ...ctx.actors.alice }
     const spaceId = ctx.generateId()
     const collectionId = 'stamps'
+    const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
     await ctx.createSpace({
       spaceDescription: {
         id: spaceId,
@@ -177,7 +188,7 @@ export const writeStampApi: Suite<State> = {
       rootClient: alice.rootClient
     })
     await alice.rootClient.request({
-      url: new URL(`/space/${spaceId}/`, ctx.serverUrl).toString(),
+      url: spaceUrl,
       method: 'POST',
       action: 'POST',
       json: { id: collectionId, name: 'Write Stamps' }
@@ -187,35 +198,32 @@ export const writeStampApi: Suite<State> = {
 
     /** Absolute URL for a Resource in the suite Collection. */
     function resourceUrl(id: string): string {
-      return new URL(
-        `/space/${spaceId}/${collectionId}/${id}`,
-        ctx.serverUrl
-      ).toString()
+      return resourceUrlOf({ spaceUrl, collectionId, resourceId: id })
+    }
+
+    function resourceMeta(id: string): string {
+      return resourceMetaUrl({ spaceUrl, collectionId, resourceId: id })
     }
 
     return {
       alice,
       spaceId,
+      spaceUrl,
       collectionId,
       metadataSupported: features.includes('metadata'),
       changesSupported: features.includes('changes-query'),
-      spaceMetaUrl: new URL(`/space/${spaceId}/meta`, ctx.serverUrl).toString(),
-      collectionMetaUrl: new URL(
-        `/space/${spaceId}/${collectionId}/meta`,
-        ctx.serverUrl
-      ).toString(),
+      spaceMetaUrl: spaceMetaUrl({ spaceUrl }),
+      collectionMetaUrl: collectionMetaUrl({ spaceUrl, collectionId }),
       resourceUrl,
-      queryUrl: new URL(
-        `/space/${spaceId}/${collectionId}/query`,
-        ctx.serverUrl
-      ).toString()
+      resourceMetaUrl: resourceMeta,
+      queryUrl: collectionQueryUrl({ spaceUrl, collectionId })
     }
   },
 
   teardown: async (ctx, state) => {
     try {
       await state.alice.rootClient.request({
-        url: new URL(`/space/${state.spaceId}/`, ctx.serverUrl).toString(),
+        url: state.spaceUrl,
         method: 'DELETE'
       })
     } catch {
@@ -315,19 +323,19 @@ export const writeStampApi: Suite<State> = {
           json: { id: resourceId }
         })
         const before = await alice.rootClient.request({
-          url: `${url}/meta`,
+          url: state.resourceMetaUrl(resourceId),
           method: 'GET'
         })
         const contentStamp = stampOf(before.data)
 
         const metaPut = await alice.rootClient.request({
-          url: `${url}/meta`,
+          url: state.resourceMetaUrl(resourceId),
           method: 'PUT',
           action: 'PUT',
           json: { custom: { a: 1 } }
         })
         const after = await alice.rootClient.request({
-          url: `${url}/meta`,
+          url: state.resourceMetaUrl(resourceId),
           method: 'GET'
         })
         // The metadata write did not write the content record.
@@ -368,7 +376,7 @@ export const writeStampApi: Suite<State> = {
         })
         if (metadataSupported) {
           await alice.rootClient.request({
-            url: `${url}/meta`,
+            url: state.resourceMetaUrl(resourceId),
             method: 'PUT',
             action: 'PUT',
             json: { custom: { a: 1 } }
@@ -383,7 +391,7 @@ export const writeStampApi: Suite<State> = {
         const documentStamp = stampOf(document)
         if (metadataSupported) {
           const meta = await alice.rootClient.request({
-            url: `${url}/meta`,
+            url: state.resourceMetaUrl(resourceId),
             method: 'GET'
           })
           assert.deepStrictEqual(documentStamp, stampOf(meta.data))
@@ -415,6 +423,7 @@ export const writeStampApi: Suite<State> = {
       run: async (ctx, state) => {
         const { alice, metadataSupported } = state
         const spaceId = ctx.generateId()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         const spaceCreate = await ctx.createSpace({
           spaceDescription: {
             id: spaceId,
@@ -425,7 +434,7 @@ export const writeStampApi: Suite<State> = {
         })
         try {
           const spaceRead = await alice.rootClient.request({
-            url: new URL(`/space/${spaceId}/meta`, ctx.serverUrl).toString(),
+            url: spaceMetaUrl({ spaceUrl }),
             method: 'GET'
           })
           assert.deepStrictEqual(
@@ -445,16 +454,13 @@ export const writeStampApi: Suite<State> = {
           }
           const collectionId = ctx.generateId()
           const collectionCreate = await alice.rootClient.request({
-            url: new URL(`/space/${spaceId}/`, ctx.serverUrl).toString(),
+            url: spaceUrl,
             method: 'POST',
             action: 'POST',
             json: { id: collectionId, name: 'Create Echo Collection' }
           })
           const collectionRead = await alice.rootClient.request({
-            url: new URL(
-              `/space/${spaceId}/${collectionId}/meta`,
-              ctx.serverUrl
-            ).toString(),
+            url: collectionMetaUrl({ spaceUrl, collectionId }),
             method: 'GET'
           })
           assert.deepStrictEqual(
@@ -468,7 +474,7 @@ export const writeStampApi: Suite<State> = {
         } finally {
           try {
             await alice.rootClient.request({
-              url: new URL(`/space/${spaceId}/`, ctx.serverUrl).toString(),
+              url: spaceUrl,
               method: 'DELETE'
             })
           } catch {
@@ -577,8 +583,8 @@ export const writeStampApi: Suite<State> = {
           readBefore: true
         })
         await assertTwoWritesMoveEtag({
-          url: `${resourceUrl}/meta`,
-          readUrl: `${resourceUrl}/meta`,
+          url: state.resourceMetaUrl(resourceId),
+          readUrl: state.resourceMetaUrl(resourceId),
           json: { custom: { a: 1 } },
           label: 'Resource Metadata',
           readBefore: false

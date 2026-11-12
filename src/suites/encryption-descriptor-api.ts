@@ -3,12 +3,27 @@
  */
 /**
  * WAS conformance tests -- Collection client-side encryption descriptor.
+ *
+ * Client-side encryption is OPTIONAL: a server MAY support no encryption
+ * schemes and remain conformant (spec "Encryption Scheme Registry"). A server
+ * that implements it advertises the `encryption` token in its PWS version
+ * entry's `features` array. setup() reads that document and each test skips
+ * when the token is absent. Once advertised, the behaviors below run at their
+ * own tier.
  */
 import assert from '../harness/assert.js'
 import { assertResourceWriteResponse, assertWriteStamp } from '../helpers.js'
+import { serviceFeatures } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
 
 import { Collection } from '@interop/pws-client'
+import {
+  collectionMetaUrl,
+  collectionQueryUrl,
+  resourceMetaUrl,
+  resourceUrl,
+  spaceUrlById
+} from '@interop/pws-client/paths'
 
 /**
  * A minimal conforming EDV Encrypted Document: the stored representation for an
@@ -50,6 +65,10 @@ function hmacDescriptor(): any {
 interface State {
   alice: any
   bob: any
+  /** Whether the server advertises the `encryption` features token. */
+  encryptionSupported: boolean
+  /** Whether the server advertises the `changes-query` features token. */
+  changesSupported: boolean
   createCollection: (json: object) => Promise<any>
 }
 
@@ -60,7 +79,11 @@ export const encryptionDescriptorApi: Suite<State> = {
   setup: async ctx => {
     const alice: any = { ...ctx.actors.alice }
     const bob: any = { ...ctx.actors.bob }
-    alice.space1 = { id: ctx.generateId() }
+    const spaceId = ctx.generateId()
+    alice.space1 = {
+      id: spaceId,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+    }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -73,21 +96,31 @@ export const encryptionDescriptorApi: Suite<State> = {
     /** POSTs a Collection (raw, so an `encryption` descriptor can be sent). */
     function createCollection(json: object): Promise<any> {
       return alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'POST',
         action: 'POST',
         json
       })
     }
 
-    return { alice, bob, createCollection }
+    const features = await serviceFeatures({ serverUrl: ctx.serverUrl })
+    const encryptionSupported = features.includes('encryption')
+    const changesSupported = features.includes('changes-query')
+
+    return {
+      alice,
+      bob,
+      encryptionSupported,
+      changesSupported,
+      createCollection
+    }
   },
 
   teardown: async (ctx, state) => {
     const { alice } = state
     try {
       await alice.rootClient.request({
-        url: new URL(`/space/${alice.space1.id}/`, ctx.serverUrl).toString(),
+        url: alice.space1.url,
         method: 'DELETE'
       })
     } catch {
@@ -101,7 +134,9 @@ export const encryptionDescriptorApi: Suite<State> = {
       name: '[root] persists and echoes the descriptor on create',
       specRefs: ['https://w3id.org/pws#collection-metadata-data-model'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         const response = await createCollection({
           id: 'vault',
@@ -112,10 +147,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         assert.deepStrictEqual(response.data.encryption, { scheme: 'edv' })
 
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/vault/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'vault'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, { scheme: 'edv' })
@@ -129,15 +164,17 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#collection-metadata-data-model'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // A `PUT` of the Metadata object that finds no Collection under the
         // id is a creating write, so it may declare the creation-only
         // descriptor.
-        const metaUrl = new URL(
-          `/space/${alice.space1.id}/put-vault/meta`,
-          serverUrl
-        ).toString()
+        const metaUrl = collectionMetaUrl({
+          spaceUrl: alice.space1.url,
+          collectionId: 'put-vault'
+        })
         const response = await alice.rootClient.request({
           url: metaUrl,
           method: 'PUT',
@@ -158,6 +195,9 @@ export const encryptionDescriptorApi: Suite<State> = {
       name: 'a delegated consumer discovers the descriptor by reading the Metadata object',
       specRefs: ['https://w3id.org/pws#collection-metadata-data-model'],
       run: async (ctx, state) => {
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, bob } = state
         // Alice grants Bob read on the vault; Bob -- who did not create it --
         // rebuilds a handle and reads the Metadata object, seeing the
@@ -179,6 +219,9 @@ export const encryptionDescriptorApi: Suite<State> = {
       name: '[root] rejects a malformed descriptor (400 invalid-request-body)',
       specRefs: ['https://w3id.org/pws#invalid-request-body'],
       run: async (ctx, state) => {
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { createCollection } = state
         let expectedError: any
         try {
@@ -199,34 +242,47 @@ export const encryptionDescriptorApi: Suite<State> = {
     },
     {
       id: 'encryption.unrecognized-scheme-400',
-      name: '[root] rejects an unrecognized scheme on first declaration (400 unsupported-encryption-scheme)',
+      name: '[root] an unrecognized scheme on first declaration is rejected (400 unsupported-encryption-scheme) or stored opaquely',
       specRefs: ['https://w3id.org/pws#unsupported-encryption-scheme'],
       run: async (ctx, state) => {
-        const { createCollection } = state
-        // The fail-closed scheme gate (spec "Encryption Scheme Registry"): a
-        // first declaration naming a scheme the server does not recognize is
-        // rejected rather than stored opaquely. A fresh Collection keeps this
-        // unambiguous -- on an already-marked one the set-once
-        // `encryption-immutable` check may fire instead (see the
-        // descriptor-immutability tests below).
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
+        const { alice, createCollection } = state
+        // The scheme gate (spec "Encryption Scheme Registry"): a first
+        // declaration naming a scheme the server does not recognize SHOULD be
+        // rejected. A server MAY instead store the descriptor opaquely, so
+        // that path is accepted too, as long as the descriptor round-trips
+        // verbatim. A fresh Collection keeps this unambiguous. On an
+        // already-marked one the set-once `encryption-immutable` check may
+        // fire instead (see the descriptor-immutability tests below).
         let expectedError: any
+        let response: any
         try {
-          await createCollection({
+          response = await createCollection({
             id: 'bad-scheme',
             encryption: { scheme: 'other' }
           })
         } catch (err) {
           expectedError = err
         }
-        assert.ok(
-          expectedError,
-          'expected the unrecognized scheme to be rejected'
-        )
-        assert.equal(expectedError.response.status, 400)
-        assert.equal(
-          expectedError.data.type,
-          'https://w3id.org/pws#unsupported-encryption-scheme'
-        )
+        if (expectedError) {
+          assert.equal(expectedError.response.status, 400)
+          assert.equal(
+            expectedError.data.type,
+            'https://w3id.org/pws#unsupported-encryption-scheme'
+          )
+        } else {
+          assert.equal(response.status, 201)
+          const read = await alice.rootClient.request({
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'bad-scheme'
+            }),
+            method: 'GET'
+          })
+          assert.deepStrictEqual(read.data.encryption, { scheme: 'other' })
+        }
       }
     },
     {
@@ -237,7 +293,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#collection-metadata-data-model'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // The descriptor is set-once: changing an existing descriptor's scheme MUST be
         // rejected with `encryption-immutable` (409). A generic suite cannot
@@ -248,10 +306,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/vault/meta`,
-              serverUrl
-            ).toString(),
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'vault'
+            }),
             method: 'PUT',
             action: 'PUT',
             json: { id: 'vault', encryption: { scheme: 'other' } }
@@ -274,10 +332,10 @@ export const encryptionDescriptorApi: Suite<State> = {
 
         // The stored descriptor must be unchanged.
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/vault/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'vault'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, { scheme: 'edv' })
@@ -291,7 +349,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#collection-metadata-data-model'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // Clearing is forbidden on the same set-once terms as changing. `PUT`
         // is a full replacement, so a body sent without `encryption` would
@@ -302,10 +362,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/vault/meta`,
-              serverUrl
-            ).toString(),
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'vault'
+            }),
             method: 'PUT',
             action: 'PUT',
             json: { id: 'vault', name: 'Vault' }
@@ -325,10 +385,10 @@ export const encryptionDescriptorApi: Suite<State> = {
 
         // The stored descriptor must survive.
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/vault/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'vault'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, { scheme: 'edv' })
@@ -342,7 +402,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#creation-only-members'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         // The descriptor is creation-only. A Collection that exists without
         // one never becomes encrypted in place, so an update that adds it
@@ -352,10 +414,10 @@ export const encryptionDescriptorApi: Suite<State> = {
           name: 'Born Plain'
         })
         assert.equal(created.status, 201)
-        const metaUrl = new URL(
-          `/space/${alice.space1.id}/born-plain/meta`,
-          serverUrl
-        ).toString()
+        const metaUrl = collectionMetaUrl({
+          spaceUrl: alice.space1.url,
+          collectionId: 'born-plain'
+        })
         const before = await alice.rootClient.request({
           url: metaUrl,
           method: 'GET'
@@ -403,7 +465,9 @@ export const encryptionDescriptorApi: Suite<State> = {
       name: '[root] rejects a non-envelope write into an encrypted Collection (422 scheme-mismatch)',
       specRefs: ['https://w3id.org/pws#encryption-scheme-mismatch'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // The fail-closed guarantee (spec "Encryption Scheme Registry"): the `vault`
         // Collection is `edv`, so a plaintext JSON write is structurally rejected --
@@ -412,10 +476,11 @@ export const encryptionDescriptorApi: Suite<State> = {
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/vault/plaintext-doc`,
-              serverUrl
-            ).toString(),
+            url: resourceUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'vault',
+              resourceId: 'plaintext-doc'
+            }),
             method: 'PUT',
             action: 'PUT',
             json: { hello: 'world' }
@@ -438,7 +503,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         '(422 scheme-mismatch)',
       specRefs: ['https://w3id.org/pws#encryption-scheme-mismatch'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // The `edv` scheme's registered media type is `application/json`. A
         // write whose body IS a structurally valid envelope but whose
@@ -449,10 +516,11 @@ export const encryptionDescriptorApi: Suite<State> = {
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/vault/mislabelled-doc`,
-              serverUrl
-            ).toString(),
+            url: resourceUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'vault',
+              resourceId: 'mislabelled-doc'
+            }),
             method: 'PUT',
             action: 'PUT',
             body: new TextEncoder().encode(JSON.stringify(edvDocument)),
@@ -477,15 +545,18 @@ export const encryptionDescriptorApi: Suite<State> = {
       name: '[root] accepts a conforming EDV Document into an encrypted Collection',
       specRefs: ['https://w3id.org/pws#encryption-scheme-registry'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // The stored representation is an EDV Encrypted Document (`{ jwe, ... }`)
         // under `application/json` -- what the EDV codec actually produces.
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/vault/envelope-doc`,
-            serverUrl
-          ).toString(),
+          url: resourceUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'vault',
+            resourceId: 'envelope-doc'
+          }),
           method: 'PUT',
           action: 'PUT',
           body: new TextEncoder().encode(JSON.stringify(edvDocument)),
@@ -499,7 +570,9 @@ export const encryptionDescriptorApi: Suite<State> = {
       name: '[root] rejects a plaintext `custom` on PUT /meta of an encrypted Collection (422)',
       specRefs: ['https://w3id.org/pws#encryption-scheme-mismatch'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // Spec "Encrypted Collections": on an encrypted Collection a resource's
         // user-writable `custom` metadata MUST be a conforming envelope, so a
@@ -508,10 +581,11 @@ export const encryptionDescriptorApi: Suite<State> = {
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/vault/envelope-doc/meta`,
-              serverUrl
-            ).toString(),
+            url: resourceMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'vault',
+              resourceId: 'envelope-doc'
+            }),
             method: 'PUT',
             action: 'PUT',
             json: { custom: { name: 'leaked' } }
@@ -539,13 +613,16 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#resource-metadata-data-model'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/vault/envelope-doc/meta`,
-            serverUrl
-          ).toString(),
+          url: resourceMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'vault',
+            resourceId: 'envelope-doc'
+          }),
           method: 'PUT',
           action: 'PUT',
           json: { custom: edvDocument }
@@ -560,10 +637,11 @@ export const encryptionDescriptorApi: Suite<State> = {
 
         // GET /meta returns the opaque envelope verbatim (no plaintext name leaked).
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/vault/envelope-doc/meta`,
-            serverUrl
-          ).toString(),
+          url: resourceMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'vault',
+            resourceId: 'envelope-doc'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.custom, edvDocument)
@@ -575,17 +653,22 @@ export const encryptionDescriptorApi: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#query-profile-changes'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
+        if (!state.changesSupported) {
+          ctx.skip('the server does not advertise changes-query')
+        }
         const { alice } = state
         // Decision 6: a metadata-only edit rides the change feed. The resource
         // re-surfaces carrying the opaque `custom` envelope and its metadata
         // stamp (`meta`), so a replicating client picks up the metadata
         // change without decryption.
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/vault/query`,
-            serverUrl
-          ).toString(),
+          url: collectionQueryUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'vault'
+          }),
           method: 'POST',
           action: 'POST',
           json: { profile: 'changes', limit: 100 }
@@ -610,11 +693,14 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#encryption-scheme-registry'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         // The `version` member is an optional positive integer naming the
-        // scheme's registered wire-format revision; `edv` version `1` is the
-        // registry's baseline every conformant server recognizes.
+        // scheme's registered wire-format revision. `edv` version `1` is the
+        // only registered pair, so a server that advertises `encryption`
+        // recognizes it.
         const response = await createCollection({
           id: 'versioned-vault',
           encryption: { scheme: 'edv', version: 1 }
@@ -622,10 +708,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         assert.equal(response.status, 201)
 
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/versioned-vault/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'versioned-vault'
+          }),
           method: 'GET'
         })
         assert.equal(read.data.encryption.scheme, 'edv')
@@ -637,6 +723,9 @@ export const encryptionDescriptorApi: Suite<State> = {
       name: '[root] rejects a non-integer version (400 invalid-request-body)',
       specRefs: ['https://w3id.org/pws#invalid-request-body'],
       run: async (ctx, state) => {
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { createCollection } = state
         // The data model: `version` is a positive integer, not a semantic
         // version -- the pre-integer string form (e.g. "0.1") is malformed.
@@ -662,7 +751,9 @@ export const encryptionDescriptorApi: Suite<State> = {
       name: '[root] accepts an explicit version 1 on a descriptor that had omitted it',
       specRefs: ['https://w3id.org/pws#collection-metadata-data-model'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         // An absent `version` means `1`, so re-declaring the standing values
         // with an explicit `version: 1` is an idempotent no-op that MUST be
@@ -674,10 +765,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         })
         assert.equal(created.status, 201)
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/versionless/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'versionless'
+          }),
           method: 'PUT',
           action: 'PUT',
           json: { id: 'versionless', encryption: { scheme: 'edv', version: 1 } }
@@ -687,10 +778,10 @@ export const encryptionDescriptorApi: Suite<State> = {
           `expected the explicit version 1 re-declaration to be accepted, got ${response.status}`
         )
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/versionless/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'versionless'
+          }),
           method: 'GET'
         })
         assert.equal(read.data.encryption.scheme, 'edv')
@@ -709,7 +800,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#collection-metadata-data-model'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // The descriptor is version-monotonic: removing the `version` MUST be
         // rejected with `encryption-immutable` (409). Because an absent
@@ -720,10 +813,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/versioned-vault/meta`,
-              serverUrl
-            ).toString(),
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'versioned-vault'
+            }),
             method: 'PUT',
             action: 'PUT',
             json: { id: 'versioned-vault', encryption: { scheme: 'edv' } }
@@ -741,10 +834,10 @@ export const encryptionDescriptorApi: Suite<State> = {
 
         // Either way, the standing version must survive semantically.
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/versioned-vault/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'versioned-vault'
+          }),
           method: 'GET'
         })
         assert.equal(read.data.encryption.scheme, 'edv')
@@ -763,7 +856,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#encryption-scheme-registry'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice } = state
         // Raising the `version` is explicitly permitted (a future scheme
         // migration), subject to the registry recognition rule -- so a raise
@@ -775,10 +870,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         let response: any
         try {
           response = await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/versioned-vault/meta`,
-              serverUrl
-            ).toString(),
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'versioned-vault'
+            }),
             method: 'PUT',
             action: 'PUT',
             json: {
@@ -797,10 +892,10 @@ export const encryptionDescriptorApi: Suite<State> = {
           )
           // The rejected raise must leave the stored descriptor unchanged.
           const read = await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/versioned-vault/meta`,
-              serverUrl
-            ).toString(),
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'versioned-vault'
+            }),
             method: 'GET'
           })
           const { version } = read.data.encryption
@@ -822,7 +917,9 @@ export const encryptionDescriptorApi: Suite<State> = {
       optional: true,
       specRefs: ['https://w3id.org/pws#unsupported-encryption-scheme'],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         // The accept-only-what-you-enforce SHOULD applies to versions on the
         // same terms as schemes: a version of a recognized scheme the server
@@ -848,10 +945,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         } else {
           assert.equal(response.status, 201)
           const read = await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/future-version/meta`,
-              serverUrl
-            ).toString(),
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'future-version'
+            }),
             method: 'GET'
           })
           assert.equal(read.data.encryption.version, 99)
@@ -866,7 +963,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#collection-metadata-data-model'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         const response = await createCollection({
           id: 'hmac-vault',
@@ -874,10 +973,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         })
         assert.equal(response.status, 201)
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/hmac-vault/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'hmac-vault'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, hmacDescriptor())
@@ -891,6 +990,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#invalid-request-body'
       ],
       run: async (ctx, state) => {
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { createCollection } = state
         // Each case violates one rule of the hmac shape: a non-empty string
         // `id` and `type`, a non-empty `recipients` array, and the epoch
@@ -938,7 +1040,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#encryption-immutable'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         const created = await createCollection({
           id: 'hmac-id-locked',
@@ -950,10 +1054,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/hmac-id-locked/meta`,
-              serverUrl
-            ).toString(),
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'hmac-id-locked'
+            }),
             method: 'PUT',
             action: 'PUT',
             json: { id: 'hmac-id-locked', encryption: changed }
@@ -968,10 +1072,10 @@ export const encryptionDescriptorApi: Suite<State> = {
           'https://w3id.org/pws#encryption-immutable'
         )
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/hmac-id-locked/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'hmac-id-locked'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, hmacDescriptor())
@@ -985,7 +1089,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#encryption-immutable'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         const created = await createCollection({
           id: 'hmac-remove-locked',
@@ -995,10 +1101,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         let expectedError: any
         try {
           await alice.rootClient.request({
-            url: new URL(
-              `/space/${alice.space1.id}/hmac-remove-locked/meta`,
-              serverUrl
-            ).toString(),
+            url: collectionMetaUrl({
+              spaceUrl: alice.space1.url,
+              collectionId: 'hmac-remove-locked'
+            }),
             method: 'PUT',
             action: 'PUT',
             json: { id: 'hmac-remove-locked', encryption: { scheme: 'edv' } }
@@ -1013,10 +1119,10 @@ export const encryptionDescriptorApi: Suite<State> = {
           'https://w3id.org/pws#encryption-immutable'
         )
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/hmac-remove-locked/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'hmac-remove-locked'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, hmacDescriptor())
@@ -1030,7 +1136,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#blinding-key-member'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         const created = await createCollection({
           id: 'hmac-rewrap',
@@ -1045,10 +1153,10 @@ export const encryptionDescriptorApi: Suite<State> = {
           recipient('did:key:zApp3#ka')
         ]
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/hmac-rewrap/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'hmac-rewrap'
+          }),
           method: 'PUT',
           action: 'PUT',
           json: { id: 'hmac-rewrap', encryption: rewrapped }
@@ -1058,10 +1166,10 @@ export const encryptionDescriptorApi: Suite<State> = {
           `expected the recipients change to be accepted, got ${response.status}`
         )
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/hmac-rewrap/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'hmac-rewrap'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, rewrapped)
@@ -1075,7 +1183,9 @@ export const encryptionDescriptorApi: Suite<State> = {
         'https://w3id.org/pws#blinding-key-member'
       ],
       run: async (ctx, state) => {
-        const { serverUrl } = ctx
+        if (!state.encryptionSupported) {
+          ctx.skip('the server does not advertise encryption')
+        }
         const { alice, createCollection } = state
         // Whether a client may install the key after provisioning is a
         // client-profile rule; the server treats late introduction as a first
@@ -1086,10 +1196,10 @@ export const encryptionDescriptorApi: Suite<State> = {
         })
         assert.equal(created.status, 201)
         const response = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/hmac-late/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'hmac-late'
+          }),
           method: 'PUT',
           action: 'PUT',
           json: { id: 'hmac-late', encryption: hmacDescriptor() }
@@ -1099,10 +1209,10 @@ export const encryptionDescriptorApi: Suite<State> = {
           `expected the late hmac introduction to be accepted, got ${response.status}`
         )
         const read = await alice.rootClient.request({
-          url: new URL(
-            `/space/${alice.space1.id}/hmac-late/meta`,
-            serverUrl
-          ).toString(),
+          url: collectionMetaUrl({
+            spaceUrl: alice.space1.url,
+            collectionId: 'hmac-late'
+          }),
           method: 'GET'
         })
         assert.deepStrictEqual(read.data.encryption, hmacDescriptor())

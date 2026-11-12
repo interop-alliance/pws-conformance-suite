@@ -14,11 +14,14 @@
  * an invocation (ezcap's confused-deputy guard), so the tests sign with the
  * low-level `signCapabilityInvocation` primitive and send a raw `fetch`.
  *
- * The spec permits either rejection shape: the invocation fails verification
+ * Two rejection shapes are accepted: the invocation fails verification
  * (400 `invalid-authorization-header`, a failure describing the request), or
  * the server treats the caller as under-authorized for the target and returns
- * the privacy-merged `not-found` (404) mask. Either way the target's content
- * must not be disclosed and the operation must not be performed.
+ * the privacy-merged `not-found` (404) mask. The authz profile's Errors list
+ * does not say which of the two a target mismatch is, so both are accepted,
+ * as the denial-reasons suite does for an action mismatch. Either way the
+ * target's content must not be disclosed and the operation must not be
+ * performed.
  */
 import {
   collectionUrl as collectionUrlOf,
@@ -79,8 +82,9 @@ async function invokeCapabilityAt({
 /**
  * Asserts a mismatched-target invocation was rejected without disclosing the
  * target: either 400 `invalid-authorization-header` (the invocation fails
- * verification) or the privacy-merged `not-found` (404) mask, always as an
- * `application/problem+json` body -- never the target's content.
+ * verification) or the privacy-merged `not-found` (404) mask, as a problem
+ * body rather than the target's content. The `application/problem+json`
+ * content type is a SHOULD in Error Handling, so it is not checked.
  *
  * @param response {Response}   the raw fetch response
  */
@@ -89,10 +93,6 @@ async function assertTargetMismatchRejected(response: Response): Promise<void> {
     response.status === 400 || response.status === 404,
     `expected the mismatched-target invocation to be rejected with 400 or ` +
       `404, got ${response.status}`
-  )
-  assert.match(
-    response.headers.get('content-type') ?? '',
-    /application\/problem\+json/
   )
   const problem: any = await response.json()
   assert.equal(
@@ -116,7 +116,11 @@ export const invocationTargetApi: Suite<State> = {
       id: spaceId,
       url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
     }
-    alice.space2 = { id: ctx.generateId() }
+    const space2Id = ctx.generateId()
+    alice.space2 = {
+      id: space2Id,
+      url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId: space2Id })
+    }
     await ctx.createSpace({
       spaceDescription: {
         id: alice.space1.id,
@@ -169,15 +173,16 @@ export const invocationTargetApi: Suite<State> = {
     })
     // Space 2: a Resource under the same controller, in a different Space.
     await alice.rootClient.request({
-      url: new URL(`/space/${alice.space2.id}/`, ctx.serverUrl).toString(),
+      url: alice.space2.url,
       method: 'POST',
       action: 'POST',
       json: { id: 'notes', name: 'Notes' }
     })
-    const docCUrl = new URL(
-      `/space/${alice.space2.id}/notes/doc-c`,
-      ctx.serverUrl
-    ).toString()
+    const docCUrl = resourceUrl({
+      spaceUrl: alice.space2.url,
+      collectionId: 'notes',
+      resourceId: 'doc-c'
+    })
     await alice.rootClient.request({
       url: docCUrl,
       method: 'PUT',
@@ -192,7 +197,7 @@ export const invocationTargetApi: Suite<State> = {
     for (const space of [alice.space1, alice.space2]) {
       try {
         await alice.rootClient.request({
-          url: new URL(`/space/${space.id}/`, ctx.serverUrl).toString(),
+          url: space.url,
           method: 'DELETE'
         })
       } catch {

@@ -2,7 +2,8 @@
  * Copyright (c) 2026 Interop Alliance. All rights reserved.
  */
 /**
- * WAS conformance tests -- the container rule (spec "The Container Rule").
+ * WAS conformance tests -- the container rule (authorization profile "The
+ * Container Rule").
  *
  * Target attenuation stops working for four operations, because a capability
  * delegated at a container's `invocationTarget` -- a Space URL or a Collection
@@ -15,10 +16,10 @@
  *   whose invoked grant targets exactly that Space's canonical
  *   trailing-slash URL with `allowedAction` exactly `['DELETE']`.
  * - Update (or Create by Id) Collection (`PUT /space/{s}/{c}/meta`) accepts
- *   a delegated capability whose invoked grant targets exactly the Space's
- *   canonical trailing-slash URL, or the Collection URL itself: a
- *   Collection-scoped grant declares the Collection's own indexes and
- *   `encryption`, and Delete Collection stays controller-only.
+ *   a delegated capability whose invoked grant targets the Space's canonical
+ *   trailing-slash URL. A grant on the Collection URL, the Collection
+ *   Metadata URL, or a Resource URL does not qualify: it is a
+ *   Collection-level data grant, and the write is refused.
  *
  * `PUT /space/{s}/meta` on an existing Space and
  * `DELETE /space/{s}/{c}/` take no delegated capability at all. Creating a
@@ -35,6 +36,14 @@
  * target is not a prefix of the request URL, so a grant outside that shape
  * never reaches the wire and could not be tested against a server at all.
  */
+import {
+  collectionMetaUrl,
+  collectionUrl,
+  rootCapabilityId,
+  spaceMetaUrl,
+  spaceUrlById
+} from '@interop/pws-client/paths'
+import { capabilityActionFor } from '../helpers.js'
 import assert from '../harness/assert.js'
 import type { Suite, TestContext } from '../harness/types.js'
 
@@ -46,7 +55,7 @@ interface State {
 }
 
 const NOT_FOUND = 'https://w3id.org/pws#not-found'
-const CONTAINER_RULE = 'https://w3id.org/pws#the-container-rule'
+const CONTAINER_RULE = 'https://w3id.org/pws/authz-profile#the-container-rule'
 
 /**
  * Provisions a fresh Space controlled by Alice and records it for teardown.
@@ -105,9 +114,9 @@ async function delegateInSpace({
   invocationTarget: string
   allowedActions: string[]
 }): Promise<any> {
-  const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
+  const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
   return state.alice.rootClient.delegate({
-    capability: `urn:zcap:root:${encodeURIComponent(spaceUrl)}`,
+    capability: rootCapabilityId(spaceUrl),
     allowedActions,
     invocationTarget,
     controller: state.aliceDelegatedApp.did
@@ -148,7 +157,7 @@ async function invoke({
     const response = await ctx.zcapClient({ signer }).request({
       url,
       method,
-      action: method,
+      action: capabilityActionFor(method),
       ...(capability && { capability }),
       ...(json && { json })
     })
@@ -197,7 +206,7 @@ export const containerRuleApi: Suite<State> = {
     for (const spaceId of state.spaceIds) {
       try {
         await state.alice.rootClient.request({
-          url: new URL(`/space/${spaceId}/`, ctx.serverUrl).toString(),
+          url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId }),
           method: 'DELETE'
         })
       } catch {
@@ -217,10 +226,9 @@ export const containerRuleApi: Suite<State> = {
           state,
           name: 'Container Rule -- Space Metadata (root)'
         })
-        const metaUrl = new URL(
-          `/space/${spaceId}/meta`,
-          ctx.serverUrl
-        ).toString()
+        const metaUrl = spaceMetaUrl({
+          spaceUrl: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+        })
         const result = await invoke({
           ctx,
           signer: state.alice.signer,
@@ -253,12 +261,12 @@ export const containerRuleApi: Suite<State> = {
           state,
           name: 'Container Rule -- Space Metadata (delegated)'
         })
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
-        const metaUrl = `${spaceUrl}meta`
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+        const metaUrl = spaceMetaUrl({ spaceUrl })
         // Two shapes a wallet actually mints: a PUT-only Space grant, and the
         // whole-verb-set generation grant. Update Space Metadata takes
         // neither -- it is controller-only.
-        const grants = [['PUT'], ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']]
+        const grants = [['PUT'], ['GET', 'POST', 'PUT', 'DELETE']]
         for (const allowedActions of grants) {
           const capability = await delegateInSpace({
             ctx,
@@ -309,26 +317,23 @@ export const containerRuleApi: Suite<State> = {
         })
         const collectionId = ctx.generateId()
         await state.alice.rootClient.request({
-          url: new URL(`/space/${spaceId}/`, ctx.serverUrl).toString(),
+          url: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId }),
           method: 'POST',
           action: 'POST',
           json: { id: collectionId, name: 'Doomed Collection' }
         })
-        const collectionUrl = new URL(
-          `/space/${spaceId}/${collectionId}/`,
-          ctx.serverUrl
-        ).toString()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         const result = await invoke({
           ctx,
           signer: state.alice.signer,
-          url: collectionUrl,
+          url: collectionUrl({ spaceUrl, collectionId }),
           method: 'DELETE'
         })
         assert.equal(result.status, 204)
         const after = await invoke({
           ctx,
           signer: state.alice.signer,
-          url: `${collectionUrl}meta`,
+          url: collectionMetaUrl({ spaceUrl, collectionId }),
           method: 'GET'
         })
         assert.equal(after.status, 404, 'the Collection should be gone')
@@ -345,20 +350,20 @@ export const containerRuleApi: Suite<State> = {
           name: 'Container Rule -- Delete Collection (delegated)'
         })
         const collectionId = ctx.generateId()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         await state.alice.rootClient.request({
-          url: new URL(`/space/${spaceId}/`, ctx.serverUrl).toString(),
+          url: spaceUrl,
           method: 'POST',
           action: 'POST',
           json: { id: collectionId, name: 'Kept Collection' }
         })
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
-        const collectionUrl = `${spaceUrl}${collectionId}/`
+        const containerUrl = collectionUrl({ spaceUrl, collectionId })
         // The Space-subtree grant, and the narrowest grant there is: DELETE
         // alone on exactly this Collection. Delete Collection has no
         // exception, so both are refused.
         const grants = [
           { invocationTarget: spaceUrl, allowedActions: ['DELETE'] },
-          { invocationTarget: collectionUrl, allowedActions: ['DELETE'] }
+          { invocationTarget: containerUrl, allowedActions: ['DELETE'] }
         ]
         for (const grant of grants) {
           const capability = await delegateInSpace({
@@ -370,7 +375,7 @@ export const containerRuleApi: Suite<State> = {
           const result = await invoke({
             ctx,
             signer: state.aliceDelegatedApp.signer,
-            url: collectionUrl,
+            url: containerUrl,
             method: 'DELETE',
             capability
           })
@@ -381,7 +386,7 @@ export const containerRuleApi: Suite<State> = {
         }
         // The Collection is still there.
         const after = await state.alice.rootClient.request({
-          url: `${collectionUrl}meta`,
+          url: collectionMetaUrl({ spaceUrl, collectionId }),
           method: 'GET'
         })
         assert.equal(after.status, 200)
@@ -398,7 +403,7 @@ export const containerRuleApi: Suite<State> = {
           state,
           name: 'Container Rule -- Delete Space (root)'
         })
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         const result = await invoke({
           ctx,
           signer: state.alice.signer,
@@ -409,7 +414,7 @@ export const containerRuleApi: Suite<State> = {
         const after = await invoke({
           ctx,
           signer: state.alice.signer,
-          url: `${spaceUrl}meta`,
+          url: spaceMetaUrl({ spaceUrl }),
           method: 'GET'
         })
         assert.equal(after.status, 404, 'the Space should be gone')
@@ -425,7 +430,7 @@ export const containerRuleApi: Suite<State> = {
           state,
           name: 'Container Rule -- Delete Space (delegated)'
         })
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         const capability = await delegateInSpace({
           ctx,
           state,
@@ -448,7 +453,7 @@ export const containerRuleApi: Suite<State> = {
         const after = await invoke({
           ctx,
           signer: state.alice.signer,
-          url: `${spaceUrl}meta`,
+          url: spaceMetaUrl({ spaceUrl }),
           method: 'GET'
         })
         assert.equal(after.status, 404, 'the Space should be gone')
@@ -464,7 +469,7 @@ export const containerRuleApi: Suite<State> = {
           state,
           name: 'Container Rule -- Delete Space (two-verb)'
         })
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         // Exactly `['DELETE']` is what the exception names. A grant carrying
         // DELETE alongside a read verb is a data grant, and is refused.
         const capability = await delegateInSpace({
@@ -487,7 +492,7 @@ export const containerRuleApi: Suite<State> = {
         })
         // The Space survived the refusal.
         const after = await state.alice.rootClient.request({
-          url: `${spaceUrl}meta`,
+          url: spaceMetaUrl({ spaceUrl }),
           method: 'GET'
         })
         assert.equal(after.status, 200)
@@ -505,10 +510,10 @@ export const containerRuleApi: Suite<State> = {
           name: 'Container Rule -- Collection Metadata (root)'
         })
         const collectionId = ctx.generateId()
-        const metaUrl = new URL(
-          `/space/${spaceId}/${collectionId}/meta`,
-          ctx.serverUrl
-        ).toString()
+        const metaUrl = collectionMetaUrl({
+          spaceUrl: spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId }),
+          collectionId
+        })
         const result = await invoke({
           ctx,
           signer: state.alice.signer,
@@ -537,15 +542,15 @@ export const containerRuleApi: Suite<State> = {
           state,
           name: 'Container Rule -- Collection Metadata (delegated)'
         })
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         const collectionId = ctx.generateId()
-        const metaUrl = `${spaceUrl}${collectionId}/meta`
+        const metaUrl = collectionMetaUrl({ spaceUrl, collectionId })
         const capability = await delegateInSpace({
           ctx,
           state,
           spaceId,
           invocationTarget: spaceUrl,
-          allowedActions: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+          allowedActions: ['GET', 'POST', 'PUT', 'DELETE']
         })
         const result = await invoke({
           ctx,
@@ -569,7 +574,7 @@ export const containerRuleApi: Suite<State> = {
     },
     {
       id: 'container-rule.collection-meta-put-delegated-collection-target',
-      name: '[delegated] PUT /space/:s/:c/meta is authorized by a grant on the Collection URL',
+      name: '[delegated] PUT /space/:s/:c/meta under a grant on the Collection URL is refused (404)',
       specRefs: [CONTAINER_RULE],
       run: async (ctx, state) => {
         const spaceId = await provisionSpace({
@@ -578,27 +583,23 @@ export const containerRuleApi: Suite<State> = {
           name: 'Container Rule -- Collection Metadata (collection target)'
         })
         const collectionId = ctx.generateId()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         await state.alice.rootClient.request({
-          url: new URL(`/space/${spaceId}/`, ctx.serverUrl).toString(),
+          url: spaceUrl,
           method: 'POST',
           action: 'POST',
           json: { id: collectionId, name: 'Unchanged Collection' }
         })
-        const collectionUrl = new URL(
-          `/space/${spaceId}/${collectionId}/`,
-          ctx.serverUrl
-        ).toString()
-        const metaUrl = `${collectionUrl}meta`
-        // A Collection-level data grant, the shape an app holds: it writes
-        // the Collection's Metadata object, which is how the app declares its
-        // own indexes and `encryption`. Deleting the Collection stays
-        // controller-only.
+        const metaUrl = collectionMetaUrl({ spaceUrl, collectionId })
+        // A Collection-level data grant, the shape an app holds. The second
+        // exception names only a grant on the Space URL, so this grant does
+        // not authorize the Metadata write.
         const capability = await delegateInSpace({
           ctx,
           state,
           spaceId,
-          invocationTarget: collectionUrl,
-          allowedActions: ['GET', 'HEAD', 'POST', 'PUT', 'DELETE']
+          invocationTarget: collectionUrl({ spaceUrl, collectionId }),
+          allowedActions: ['GET', 'POST', 'PUT', 'DELETE']
         })
         const result = await invoke({
           ctx,
@@ -608,17 +609,17 @@ export const containerRuleApi: Suite<State> = {
           capability,
           json: { id: collectionId, name: 'Rewritten By A Delegate' }
         })
-        assert.equal(
-          result.status,
-          204,
-          'expected a delegated PUT under a Collection-URL grant to succeed'
-        )
+        assertRefused({
+          result,
+          message: 'a delegated PUT under a Collection-URL grant'
+        })
+        // Nothing was written: the stored name is intact.
         const after = await state.alice.rootClient.request({
           url: metaUrl,
           method: 'GET'
         })
         assert.equal(after.status, 200)
-        assert.equal(after.data.name, 'Rewritten By A Delegate')
+        assert.equal(after.data.name, 'Unchanged Collection')
       }
     },
     {
@@ -626,7 +627,7 @@ export const containerRuleApi: Suite<State> = {
       name: '[delegated] POST /space/:s/ still creates a Collection under an exact-target Space grant',
       specRefs: [
         CONTAINER_RULE,
-        'https://w3id.org/pws#create-collection-operation'
+        'https://w3id.org/pws#create-collection-add-collection-to-a-space-operation'
       ],
       run: async (ctx, state) => {
         const spaceId = await provisionSpace({
@@ -634,7 +635,7 @@ export const containerRuleApi: Suite<State> = {
           state,
           name: 'Container Rule -- Create Collection (delegated)'
         })
-        const spaceUrl = new URL(`/space/${spaceId}/`, ctx.serverUrl).toString()
+        const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
         const collectionId = ctx.generateId()
         const capability = await delegateInSpace({
           ctx,
@@ -657,7 +658,7 @@ export const containerRuleApi: Suite<State> = {
           'Create Collection is unaffected by the container rule'
         )
         const after = await state.alice.rootClient.request({
-          url: `${spaceUrl}${collectionId}/meta`,
+          url: collectionMetaUrl({ spaceUrl, collectionId }),
           method: 'GET'
         })
         assert.equal(after.status, 200)
