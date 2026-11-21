@@ -19,6 +19,7 @@ import assert from '../harness/assert.js'
 import { serviceFeatures } from '../harness/serviceDescription.js'
 import type { ConformanceContext, Suite } from '../harness/types.js'
 import {
+  assertCreatedByNotForged,
   assertResolvesTo,
   checkBackendsMember,
   withoutContainerUrls,
@@ -1605,9 +1606,11 @@ export const spacesApi: Suite<State> = {
         const { alice } = state
         // `createdBy` is server-managed and read-only: the spec requires a
         // server to ignore a `createdBy` supplied in a request body. The value
-        // below is a well-formed but bogus DID that is not the creator.
-        const bogusCreatedBy =
+        // below is a well-formed list holding a bogus DID that is not the
+        // creator.
+        const bogusCreatedBy = [
           'did:key:z6MkpBMbMaRSv5nsgifRAwEKvHHoiKDMhiAHShTFNmkJXXXX'
+        ]
         const spaceId = generateId()
         await createSpace({
           spaceDescription: {
@@ -1625,13 +1628,12 @@ export const spacesApi: Suite<State> = {
             action: 'GET'
           })
           assert.equal(response.status, 200)
-          // Either absent (token-provisioned create records no createdBy) or
-          // set to the real invoker -- never the bogus body value.
-          assert.notEqual(
-            response.data.createdBy,
-            bogusCreatedBy,
-            'the server must ignore a body-supplied createdBy'
-          )
+          // Absent when the create was token-provisioned, which records no
+          // createdBy.
+          assertCreatedByNotForged({
+            served: response.data.createdBy,
+            forged: bogusCreatedBy
+          })
         } finally {
           try {
             await alice.rootClient.request({

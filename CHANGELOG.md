@@ -1,5 +1,28 @@
 # @interop/pws-conformance-suite Changelog
 
+## 0.39.0 - TBD
+
+### Added
+
+- The `created-by-api` suite, gated on the `created-by` feature token. Seven
+  cases assert `createdBy` is the list of DIDs a create was delegated through:
+  `created-by.root-space`, `created-by.root-collection`,
+  `created-by.root-resource`, `created-by.one-link-delegation`,
+  `created-by.two-link-delegation`, `created-by.unchanged-after-later-write` and
+  `created-by.changes-feed-document`. The last is optional, as the spec makes
+  the feed member a SHOULD.
+
+### Changed
+
+- **BREAKING**: a served `createdBy` is a non-empty array of DID strings. A
+  `201` Resource write response that carries the member is checked for that
+  shape. `space.create-ignores-body-createdby` and
+  `collection.meta-put-ignores-server-managed` send a forged array and refuse a
+  single DID string as the served value. They also refuse a served list that
+  holds a forged entry.
+- `collection.meta-put-ignores-server-managed` asserts the write leaves
+  `createdBy` unchanged.
+
 ## 0.38.0 - 2026-11-12
 
 ### Added

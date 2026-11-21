@@ -18,6 +18,7 @@ import type { IZcap } from '@interop/data-integrity-core/zcap'
 import assert from '../harness/assert.js'
 import { serviceFeatures } from '../harness/serviceDescription.js'
 import {
+  assertCreatedByNotForged,
   capabilityActionFor,
   withoutCreatingStamp,
   withoutWriteStamp
@@ -974,13 +975,14 @@ export const collectionApi: Suite<State> = {
           method: 'GET'
         })
         const managedCreatedAt = before.data.createdAt
+        const forgedCreatedBy = ['did:key:zSomeoneElse']
         const putResponse = await alice.rootClient.request({
           url: metaUrl,
           method: 'PUT',
           action: 'PUT',
           json: {
             ...before.data,
-            createdBy: 'did:key:zSomeoneElse',
+            createdBy: forgedCreatedBy,
             createdAt: '1999-01-01T00:00:00.000Z',
             custom: { name: 'After' }
           }
@@ -996,7 +998,12 @@ export const collectionApi: Suite<State> = {
         })
         assert.equal(after.status, 200)
         assert.equal(after.data.createdAt, managedCreatedAt)
-        assert.notEqual(after.data.createdBy, 'did:key:zSomeoneElse')
+        assertCreatedByNotForged({
+          served: after.data.createdBy,
+          forged: forgedCreatedBy
+        })
+        // A later write keeps the recorded list.
+        assert.deepStrictEqual(after.data.createdBy, before.data.createdBy)
         // Only the user-writable `custom` was applied.
         assert.deepStrictEqual(after.data.custom, { name: 'After' })
       }

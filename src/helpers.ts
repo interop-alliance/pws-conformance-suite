@@ -338,6 +338,55 @@ export function withoutCreatedBy(value: unknown): unknown {
 }
 
 /**
+ * Checks the shape of a served `createdBy`: a non-empty array of DID strings.
+ * It lists the DIDs the creating write was delegated through, in delegation
+ * order, with the invoker last. A record created by one party carries a
+ * one-entry array. A single DID string is not the served shape.
+ *
+ * @param value {unknown}   the `createdBy` member as served
+ */
+export function assertCreatedByList(value: unknown): void {
+  assert.ok(
+    Array.isArray(value) && value.length > 0,
+    '`createdBy` must be a non-empty array of DIDs'
+  )
+  for (const entry of value as unknown[]) {
+    assert.ok(
+      typeof entry === 'string' && /^did:[a-z0-9]+:.+/.test(entry),
+      '`createdBy` must list DID strings'
+    )
+  }
+}
+
+/**
+ * Checks that a server ignored a `createdBy` supplied in a request body. The
+ * served member is either absent or the list the server recorded. It holds no
+ * entry of the forged list, and it is not a single DID string.
+ *
+ * @param options {object}
+ * @param options.served {unknown}   the `createdBy` member as served
+ * @param options.forged {string[]}   the list the request body supplied
+ */
+export function assertCreatedByNotForged({
+  served,
+  forged
+}: {
+  served: unknown
+  forged: string[]
+}): void {
+  if (served === undefined) {
+    return
+  }
+  assertCreatedByList(served)
+  for (const did of forged) {
+    assert.ok(
+      !(served as unknown[]).includes(did),
+      'the server must ignore a body-supplied createdBy'
+    )
+  }
+}
+
+/**
  * Checks the write stamp a versioned record carries (`updatedAt`,
  * `updatedAtCounter`, `originId`) and returns the record without it, for an
  * exact-shape comparison of the rest. Every write mints the stamp at the origin
@@ -502,6 +551,9 @@ export function assertResourceWriteResponse({
   assertWriteStamp(body)
   if (response.status === 201) {
     assert.equal(typeof body.createdAt, 'string', 'expected `createdAt`')
+    if (body.createdBy !== undefined) {
+      assertCreatedByList(body.createdBy)
+    }
   } else {
     assert.equal(body.createdAt, undefined, '`createdAt` only on a 201')
     assert.equal(body.createdBy, undefined, '`createdBy` only on a 201')

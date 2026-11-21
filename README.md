@@ -135,6 +135,7 @@ The available suite ids (for `--suite`) are:
 | `collection-api`            | Collections API                                         |
 | `conditional-requests-api`  | Conditional requests & caching                          |
 | `container-rule-api`        | The container rule                                      |
+| `created-by-api`            | Creation provenance (`createdBy`)                       |
 | `delegation-cryptosuites`   | Delegation-proof cryptosuites                           |
 | `denial-reasons-api`        | Typed denial reasons (capability-expired / -revoked)    |
 | `digest-api`                | Request body integrity (Digest) negatives               |
