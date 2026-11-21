@@ -1,5 +1,13 @@
 # @interop/pws-conformance-suite Changelog
 
+## 0.39.1 - TBD
+
+### Changed
+
+- `write-validation.collection-reserved-id-put` and
+  `write-validation.reserved-segment-path-not-found` also cite the spec's
+  "Methods at Reserved Endpoints" section, which holds the 404 rule.
+
 ## 0.39.0 - 2026-11-21
 
 ### Added

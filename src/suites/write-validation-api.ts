@@ -134,6 +134,7 @@ export const writeValidationApi: Suite<State> = {
         '(`export/meta`) is not found (404), not a reserved-id conflict',
       specRefs: [
         'https://w3id.org/pws#space-level-reserved-endpoints',
+        'https://w3id.org/pws#methods-at-reserved-endpoints',
         'https://w3id.org/pws#update-or-create-by-id-collection-operation'
       ],
       run: async (ctx, state) => {
@@ -164,7 +165,10 @@ export const writeValidationApi: Suite<State> = {
       name:
         '[root] a path beneath a reserved segment that no endpoint defines ' +
         '(`export/x`) is not found (404)',
-      specRefs: ['https://w3id.org/pws#space-level-reserved-endpoints'],
+      specRefs: [
+        'https://w3id.org/pws#space-level-reserved-endpoints',
+        'https://w3id.org/pws#methods-at-reserved-endpoints'
+      ],
       run: async (ctx, state) => {
         const { alice, spaceUrl } = state
         let expectedError: any
