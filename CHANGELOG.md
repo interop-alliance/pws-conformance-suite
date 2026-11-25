@@ -20,8 +20,33 @@
   - The keystore, revocation and Create Space cases are optional. The first two
     skip on a server without a `/kms` facet or a revocation endpoint.
 
+- The `did-url-targets-api` suite, gated on the `did-url-targets` feature token
+  of the authorization profile entry. It provisions a Space controlled by a
+  self-hosted `did:webvh` whose document carries `PathHandler` services. Every
+  case skips when the token is absent or the server refuses that controller.
+  - Admitted chains: `did-url-targets.root-read-write`,
+    `did-url-targets.delegated-read-write`,
+    `did-url-targets.selector-first-link-admitted` and
+    `did-url-targets.query-request-accepted`.
+  - Refusals, each compared byte for byte with the answer an unrelated key
+    collects: `did-url-targets.https-root-did-link-refused`,
+    `did-url-targets.did-root-https-link-refused`,
+    `did-url-targets.target-other-space-refused`,
+    `did-url-targets.target-other-host-refused`,
+    `did-url-targets.target-above-parent-refused`,
+    `did-url-targets.selector-later-link-refused` and
+    `did-url-targets.selector-changed-refused`.
+  - `did-url-targets.expired-named-at-own-space-only` requires the masked
+    `not-found` for an expired grant at another Space of the same controller.
+  - `did-url-targets.revoked-named-at-own-space-only` and
+    `did-url-targets.revoked-grant-refused` are optional, and skip on a server
+    without a revocation endpoint.
+- New dependencies: `@interop/did-method-webvh`, `@interop/zcap` and
+  `@interop/jsonld-signatures`.
+
 ### Changed
 
+- Requires `@interop/ezcap` 7.9.0, which delegates a DID URL target.
 - `write-validation.collection-reserved-id-put` and
   `write-validation.reserved-segment-path-not-found` also cite the spec's
   "Methods at Reserved Endpoints" section, which holds the 404 rule.

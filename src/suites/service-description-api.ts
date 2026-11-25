@@ -17,6 +17,7 @@
  */
 import { spacesRepositoryUrl, spaceUrlById } from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
+import { AUTHZ_PROFILE_IDENTIFIER } from '../harness/serviceDescription.js'
 import type { Suite } from '../harness/types.js'
 
 interface State {
@@ -153,9 +154,6 @@ function assertArrayOfStrings(value: unknown, label: string): void {
 }
 
 const VERSION_ENTRY_REGEX = /^\d+\.\d+$/
-
-/** The baseline authorization profile's self-declared identifier. */
-const AUTHZ_PROFILE_IDENTIFIER = 'https://w3id.org/pws/authz-profile'
 
 /**
  * A service description version entry, with the members this suite reads.

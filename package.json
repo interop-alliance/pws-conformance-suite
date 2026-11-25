@@ -43,12 +43,15 @@
   "dependencies": {
     "@digitalcredentials/bnid": "^5.0.0",
     "@interop/data-integrity-core": "^8.12.0",
+    "@interop/did-method-webvh": "^5.22.0",
     "@interop/ed25519-signature": "^7.2.5",
     "@interop/ed25519-verification-key": "^8.2.2",
-    "@interop/ezcap": "^7.6.0",
+    "@interop/ezcap": "^7.9.0",
     "@interop/http-digest-header": "^3.2.0",
     "@interop/http-signature-zcap-invoke": "^6.3.0",
+    "@interop/jsonld-signatures": "^11.9.0",
     "@interop/x25519-key-agreement-key": "^5.4.3",
+    "@interop/zcap": "^12.3.1",
     "assert": "^2.1.0",
     "uuid": "^14.0.0"
   },

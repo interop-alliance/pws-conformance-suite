@@ -34,6 +34,7 @@ import {
   spaceUrlById
 } from '@interop/pws-client/paths'
 import assert from '../harness/assert.js'
+import { revokeOrSkip } from '../helpers.js'
 import type {
   ConformanceContext,
   Suite,
@@ -159,14 +160,12 @@ async function delegateAndRevoke({
     signer: aliceDelegatedApp.signer
   })
   assert.equal(before.status, 200)
-  try {
-    await alice.pws.space(state.spaceId).revoke(capability)
-  } catch (err: any) {
-    if ([404, 405, 501].includes(err.status)) {
-      ctx.skip('zcap revocation endpoint not implemented')
-    }
-    throw err
-  }
+  await revokeOrSkip({
+    ctx,
+    pws: alice.pws,
+    spaceId: state.spaceId,
+    capability
+  })
   return capability
 }
 

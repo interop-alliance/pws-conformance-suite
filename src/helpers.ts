@@ -4,21 +4,40 @@
 import { ZcapClient } from '@interop/ezcap'
 import { PwsClient } from '@interop/pws-client'
 import {
+  collectionUrl,
+  resourceUrl,
   spaceMetaUrl,
   spacesRepositoryUrl,
   spaceUrlById
 } from '@interop/pws-client/paths'
 import type { Space } from '@interop/pws-client'
+import {
+  createDID,
+  logToJsonlString,
+  PATH_HANDLER_SERVICE_TYPE,
+  signerFromDidKeySigner
+} from '@interop/did-method-webvh'
+import type {
+  DIDLog,
+  ServiceEndpoint,
+  Signer as WebvhLogSigner
+} from '@interop/did-method-webvh'
 import { decodeSecretKeySeed } from '@digitalcredentials/bnid'
 import { EddsaJcs2022 } from '@interop/ed25519-signature/eddsa-jcs-2022'
 import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
 import type { ISigner } from '@interop/data-integrity-core'
+import type { IDelegatedZcap, IZcap } from '@interop/data-integrity-core/zcap'
 import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import { v4 as uuidv4 } from 'uuid'
 
 import assert from './harness/assert.js'
 import { serviceFeatures } from './harness/serviceDescription.js'
-import type { Actors, ConformanceContext } from './harness/types.js'
+import type {
+  Actor,
+  Actors,
+  ConformanceContext,
+  TestContext
+} from './harness/types.js'
 
 /**
  * Deterministic test-identity seeds. Publishing them is a feature: a server
@@ -66,14 +85,17 @@ export function capabilityActionFor(method: string): string {
 }
 
 /**
- * Signs a raw root capability invocation for an arbitrary method and sends it
- * via `fetch`, returning the response untouched. For the requests a client
+ * Signs a raw capability invocation for an arbitrary method and sends it via
+ * `fetch`, returning the response untouched. For the requests a client
  * library refuses to build, and for the cases that read the raw response.
+ * Without a `capability` it is a root invocation of the URL's own root.
  *
  * @param options {object}
  * @param options.url {string}   the target URL
  * @param options.method {string}   the HTTP method to send
  * @param options.invocationSigner {ISigner}   the caller's signer
+ * @param [options.capability] {string | IZcap}   the capability to invoke: a
+ *   root capability id, or a delegated capability
  * @param [options.json] {object}   an optional JSON body
  * @param [options.action] {string}   the capability action to sign (default:
  *   the method's own action, per `capabilityActionFor`)
@@ -83,12 +105,14 @@ export async function signedRequest({
   url,
   method,
   invocationSigner,
+  capability,
   json,
   action = capabilityActionFor(method)
 }: {
   url: string
   method: string
   invocationSigner: ISigner
+  capability?: string | IZcap
   json?: object
   action?: string
 }): Promise<Response> {
@@ -105,6 +129,7 @@ export async function signedRequest({
     },
     ...(body !== undefined && { body }),
     invocationSigner,
+    ...(capability !== undefined && { capability }),
     capabilityAction: action
   })
   return fetch(url, {
@@ -366,6 +391,254 @@ export async function provisionSpace({
     )
   }
   return pws.space(id)
+}
+
+/**
+ * A `PathHandler` service that maps a DID URL path to an https URL.
+ *
+ * @param options {object}
+ * @param options.path {string}   the DID URL path, e.g. `/` or `/photos`
+ * @param options.serviceEndpoint {string}   the https URL the path maps to
+ * @returns {ServiceEndpoint}
+ */
+export function pathHandler({
+  path,
+  serviceEndpoint
+}: {
+  path: string
+  serviceEndpoint: string
+}): ServiceEndpoint {
+  const id = path === '/' ? '#root' : `#${path.slice(1).replace(/\//g, '-')}`
+  return { id, type: PATH_HANDLER_SERVICE_TYPE, path, serviceEndpoint }
+}
+
+/**
+ * The server answered an Update Space that names a new controller with
+ * something other than success. A caller reads `status` to tell a server
+ * that does not support the controller's DID method from any other failure.
+ *
+ * @param status {number}   the status the server answered
+ */
+export class SpaceControllerUpdateError extends Error {
+  status: number
+
+  constructor(status: number) {
+    super(`Update Space with a new controller answered ${status}`)
+    this.name = 'SpaceControllerUpdateError'
+    this.status = status
+  }
+}
+
+/** A Space whose controller is a self-hosted `did:webvh`. */
+export interface WebvhSpace {
+  spaceId: string
+  /** The Space's canonical trailing-slash URL. */
+  spaceUrl: string
+  /** The `did:webvh` the Space is controlled by. */
+  did: string
+  /** The DID's history log, for `updateDID` to append a version to. */
+  log: DIDLog
+  /** The update-key signer every entry of the log is signed by. */
+  logSigner: WebvhLogSigner
+  /** The URL the history log is published at. */
+  logUrl: string
+  /**
+   * The signer of the document's one verification method, which holds every
+   * verification relationship. It invokes and delegates as the controller.
+   */
+  signer: ISigner
+}
+
+/**
+ * Updates a Space's controller, with a root invocation by the current one.
+ *
+ * @param options {object}
+ * @param options.spaceUrl {string}
+ * @param options.spaceDescription {object}   the full Space Metadata object
+ *   to write, carrying the new `controller`
+ * @param options.signer {ISigner}   the current controller's signer
+ * @returns {Promise<void>}
+ * @throws {SpaceControllerUpdateError}   on any answer but success
+ */
+export async function updateSpaceController({
+  spaceUrl,
+  spaceDescription,
+  signer
+}: {
+  spaceUrl: string
+  spaceDescription: object
+  signer: ISigner
+}): Promise<void> {
+  const response = await signedRequest({
+    url: spaceMetaUrl({ spaceUrl }),
+    method: 'PUT',
+    invocationSigner: signer,
+    json: spaceDescription
+  })
+  if (!response.ok) {
+    throw new SpaceControllerUpdateError(response.status)
+  }
+}
+
+/**
+ * Provisions a Space whose controller is a self-hosted `did:webvh`. The Space
+ * is created under the owner's `did:key`, since Space creation takes no other
+ * controller. The DID's history log is published as the `did.jsonl` Resource
+ * of the Space's `id` Collection, and the Space is then updated to the new
+ * controller. The first version of the DID document carries one `PathHandler`
+ * service, which maps the path `/` to the Space's URL. The Space is deleted
+ * again when a step after its creation fails.
+ *
+ * @param options {object}
+ * @param options.ctx {ConformanceContext}
+ * @param options.owner {Actor}   the `did:key` identity that creates the Space
+ * @param [options.name] {string}   the Space's name
+ * @returns {Promise<WebvhSpace>}
+ * @throws {SpaceControllerUpdateError}   when the server does not accept the
+ *   new controller
+ */
+export async function provisionWebvhSpace({
+  ctx,
+  owner,
+  name = 'did:webvh Controller Space'
+}: {
+  ctx: ConformanceContext
+  owner: Actor
+  name?: string
+}): Promise<WebvhSpace> {
+  const spaceId = ctx.generateId()
+  const spaceUrl = spaceUrlById({ baseServerUrl: ctx.serverUrl, spaceId })
+  const collectionId = 'id'
+  const created = await ctx.createSpace({
+    spaceDescription: { id: spaceId, name, controller: owner.did },
+    rootClient: owner.rootClient
+  })
+  assert.equal(created.status, 201)
+  try {
+    await owner.rootClient.request({
+      url: spaceUrl,
+      method: 'POST',
+      action: 'POST',
+      json: { id: collectionId, name: 'Identity' }
+    })
+
+    const [updateKeyPair, keyPair] = await Promise.all([
+      Ed25519VerificationKey.generate(),
+      Ed25519VerificationKey.generate()
+    ])
+    const logSigner = signerFromDidKeySigner(updateKeyPair.didKeySigner())
+    // The DID's address is the log's Collection URL, without the slash.
+    const { did, log } = await createDID({
+      address: collectionUrl({ spaceUrl, collectionId }).slice(0, -1),
+      signer: logSigner,
+      updateKeys: [updateKeyPair.publicKeyMultibase!],
+      vmIdFragment: 'multibase',
+      verificationMethods: [
+        {
+          type: 'Multikey',
+          publicKeyMultibase: keyPair.publicKeyMultibase!,
+          purpose: [
+            'authentication',
+            'assertionMethod',
+            'capabilityInvocation',
+            'capabilityDelegation'
+          ]
+        }
+      ],
+      services: [pathHandler({ path: '/', serviceEndpoint: spaceUrl })]
+    })
+    keyPair.id = `${did}#${keyPair.publicKeyMultibase}`
+    keyPair.controller = did
+
+    const logUrl = resourceUrl({
+      spaceUrl,
+      collectionId,
+      resourceId: 'did.jsonl'
+    })
+    await publishWebvhLog({ logUrl, log, signer: owner.signer })
+    await updateSpaceController({
+      spaceUrl,
+      spaceDescription: { id: spaceId, name, controller: did },
+      signer: owner.signer
+    })
+    return {
+      spaceId,
+      spaceUrl,
+      did,
+      log,
+      logSigner,
+      logUrl,
+      signer: keyPair.signer()
+    }
+  } catch (err) {
+    try {
+      await owner.rootClient.request({ url: spaceUrl, method: 'DELETE' })
+    } catch {
+      /* best-effort cleanup */
+    }
+    throw err
+  }
+}
+
+/**
+ * Publishes a `did:webvh` history log with a `PUT` of the whole log. The
+ * first publish creates the Resource, and a later one appends a version.
+ *
+ * @param options {object}
+ * @param options.logUrl {string}   the log's Resource URL
+ * @param options.log {DIDLog}   the whole log
+ * @param options.signer {ISigner}   the Space controller's signer
+ * @returns {Promise<void>}
+ */
+export async function publishWebvhLog({
+  logUrl,
+  log,
+  signer
+}: {
+  logUrl: string
+  log: DIDLog
+  signer: ISigner
+}): Promise<void> {
+  await zcapClient({ signer }).request({
+    url: logUrl,
+    method: 'PUT',
+    action: 'PUT',
+    headers: { 'content-type': 'text/jsonl' },
+    body: new Blob([logToJsonlString(log)], { type: 'text/jsonl' })
+  })
+}
+
+/**
+ * Submits a capability to a Space's revocation endpoint through the client's
+ * `space.revoke()`. The endpoint is not in the spec yet, so the test is
+ * skipped when the server has none.
+ *
+ * @param options {object}
+ * @param options.ctx {TestContext}   the test context (for `skip`)
+ * @param options.pws {PwsClient}   a client of the party that revokes
+ * @param options.spaceId {string}   the Space to submit at
+ * @param options.capability {IDelegatedZcap}   the capability to revoke
+ * @returns {Promise<void>}
+ */
+export async function revokeOrSkip({
+  ctx,
+  pws,
+  spaceId,
+  capability
+}: {
+  ctx: TestContext
+  pws: PwsClient
+  spaceId: string
+  capability: IDelegatedZcap
+}): Promise<void> {
+  try {
+    await pws.space(spaceId).revoke(capability)
+  } catch (err: any) {
+    if ([404, 405, 501].includes(err.status)) {
+      ctx.skip('zcap revocation endpoint not implemented')
+    }
+    throw err
+  }
 }
 
 /**

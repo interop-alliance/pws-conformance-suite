@@ -18,6 +18,9 @@ export const PWS_SPEC_IDENTIFIER = 'https://w3id.org/pws'
 export const ENCRYPTED_COLLECTIONS_IDENTIFIER =
   'https://w3id.org/pws/encrypted-collections'
 
+/** The zCap authorization profile's self-declared persistent identifier. */
+export const AUTHZ_PROFILE_IDENTIFIER = 'https://w3id.org/pws/authz-profile'
+
 /**
  * Resolves the `service`-relation `Link` target of a response against the
  * response's own URL.

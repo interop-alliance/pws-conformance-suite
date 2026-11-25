@@ -138,6 +138,7 @@ The available suite ids (for `--suite`) are:
 | `created-by-api`            | Creation provenance (`createdBy`)                       |
 | `delegation-cryptosuites`   | Delegation-proof cryptosuites                           |
 | `denial-reasons-api`        | Typed denial reasons (capability-expired / -revoked)    |
+| `did-url-targets-api`       | DID URL capability targets (`did-url-targets`)          |
 | `digest-api`                | Request body integrity (Digest) negatives               |
 | `encryption-descriptor-api` | Encryption descriptor API                               |
 | `governed-log-api`          | Governing history log API                               |
@@ -278,4 +279,4 @@ If editing the Readme, please conform to the
 
 ## License
 
-[MIT License](LICENSE.md) © 2026 Interop Alliance. </content> </invoke>
+[MIT License](LICENSE.md) © 2026 Interop Alliance.

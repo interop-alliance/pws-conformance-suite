@@ -18,6 +18,7 @@ import { containerRuleApi } from './container-rule-api.js'
 import { createdByApi } from './created-by-api.js'
 import { delegationCryptosuitesApi } from './delegation-cryptosuites-api.js'
 import { denialReasonsApi } from './denial-reasons-api.js'
+import { didUrlTargetsApi } from './did-url-targets-api.js'
 import { digestApi } from './digest-api.js'
 import { encryptionDescriptorApi } from './encryption-descriptor-api.js'
 import { governedLogApi } from './governed-log-api.js'
@@ -54,6 +55,7 @@ export const suites: Array<Suite<any>> = [
   createdByApi,
   delegationCryptosuitesApi,
   denialReasonsApi,
+  didUrlTargetsApi,
   digestApi,
   encryptionDescriptorApi,
   governedLogApi,
@@ -87,6 +89,7 @@ export {
   createdByApi,
   delegationCryptosuitesApi,
   denialReasonsApi,
+  didUrlTargetsApi,
   digestApi,
   encryptionDescriptorApi,
   governedLogApi,
