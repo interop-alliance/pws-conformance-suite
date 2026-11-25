@@ -13,6 +13,7 @@ import { decodeSecretKeySeed } from '@digitalcredentials/bnid'
 import { EddsaJcs2022 } from '@interop/ed25519-signature/eddsa-jcs-2022'
 import { Ed25519VerificationKey } from '@interop/ed25519-verification-key'
 import type { ISigner } from '@interop/data-integrity-core'
+import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import { v4 as uuidv4 } from 'uuid'
 
 import assert from './harness/assert.js'
@@ -62,6 +63,55 @@ export function zcapClient({ signer }: { signer: ISigner }): ZcapClient {
  */
 export function capabilityActionFor(method: string): string {
   return method.toUpperCase() === 'HEAD' ? 'GET' : method
+}
+
+/**
+ * Signs a raw root capability invocation for an arbitrary method and sends it
+ * via `fetch`, returning the response untouched. For the requests a client
+ * library refuses to build, and for the cases that read the raw response.
+ *
+ * @param options {object}
+ * @param options.url {string}   the target URL
+ * @param options.method {string}   the HTTP method to send
+ * @param options.invocationSigner {ISigner}   the caller's signer
+ * @param [options.json] {object}   an optional JSON body
+ * @param [options.action] {string}   the capability action to sign (default:
+ *   the method's own action, per `capabilityActionFor`)
+ * @returns {Promise<Response>}
+ */
+export async function signedRequest({
+  url,
+  method,
+  invocationSigner,
+  json,
+  action = capabilityActionFor(method)
+}: {
+  url: string
+  method: string
+  invocationSigner: ISigner
+  json?: object
+  action?: string
+}): Promise<Response> {
+  const body =
+    json === undefined
+      ? undefined
+      : new TextEncoder().encode(JSON.stringify(json))
+  const signatureHeaders = await signCapabilityInvocation({
+    url,
+    method,
+    headers: {
+      date: new Date().toUTCString(),
+      ...(body !== undefined && { 'content-type': 'application/json' })
+    },
+    ...(body !== undefined && { body }),
+    invocationSigner,
+    capabilityAction: action
+  })
+  return fetch(url, {
+    method,
+    headers: signatureHeaders as Record<string, string>,
+    ...(body !== undefined && { body: new Blob([body]) })
+  })
 }
 
 /**

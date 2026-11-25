@@ -1,6 +1,24 @@
 # @interop/pws-conformance-suite Changelog
 
-## 0.39.1 - TBD
+## 0.40.0 - TBD
+
+### Added
+
+- The `masked-denial-api` suite. Each case probes an absent target and an
+  existing one the caller may not read, and requires the same status,
+  `Content-Type` and raw body text from both.
+  - Bob's signed reads must both answer 404: `masked-denial.space-signed`,
+    `masked-denial.collection-signed`, `masked-denial.resource-signed` and
+    `masked-denial.keystore-signed`.
+  - Unsigned reads may answer 401 or 404: `masked-denial.space-anonymous`,
+    `masked-denial.collection-anonymous`, `masked-denial.resource-anonymous` and
+    `masked-denial.keystore-anonymous`.
+  - `masked-denial.revocation-malformed-body` sends a malformed revocation under
+    Bob's signature to an existing and an absent Space.
+  - `masked-denial.create-space-no-id-conflict` refuses a 409 for Bob's Create
+    Space naming an existing id.
+  - The keystore, revocation and Create Space cases are optional. The first two
+    skip on a server without a `/kms` facet or a revocation endpoint.
 
 ### Changed
 

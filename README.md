@@ -142,6 +142,7 @@ The available suite ids (for `--suite`) are:
 | `encryption-descriptor-api` | Encryption descriptor API                               |
 | `governed-log-api`          | Governing history log API                               |
 | `invocation-target-api`     | Capability invocationTarget binding                     |
+| `masked-denial-api`         | Masked denials match absent targets byte for byte       |
 | `plaintext-declaration-api` | Plaintext declaration API                               |
 | `policy-api`                | Access-control policy API                               |
 | `reserved-methods-api`      | Methods at reserved endpoints (405)                     |

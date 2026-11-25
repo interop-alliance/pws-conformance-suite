@@ -22,6 +22,7 @@ import { digestApi } from './digest-api.js'
 import { encryptionDescriptorApi } from './encryption-descriptor-api.js'
 import { governedLogApi } from './governed-log-api.js'
 import { invocationTargetApi } from './invocation-target-api.js'
+import { maskedDenialApi } from './masked-denial-api.js'
 import { plaintextDeclarationApi } from './plaintext-declaration-api.js'
 import { policyApi } from './policy-api.js'
 import { reservedMethodsApi } from './reserved-methods-api.js'
@@ -57,6 +58,7 @@ export const suites: Array<Suite<any>> = [
   encryptionDescriptorApi,
   governedLogApi,
   invocationTargetApi,
+  maskedDenialApi,
   plaintextDeclarationApi,
   policyApi,
   reservedMethodsApi,
@@ -89,6 +91,7 @@ export {
   encryptionDescriptorApi,
   governedLogApi,
   invocationTargetApi,
+  maskedDenialApi,
   plaintextDeclarationApi,
   policyApi,
   reservedMethodsApi,

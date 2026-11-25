@@ -30,7 +30,6 @@
  * behavior getting in the way. Each invocation names the request method as
  * its action, except a `HEAD`, which names the `GET` action.
  */
-import { signCapabilityInvocation } from '@interop/http-signature-zcap-invoke'
 import {
   collectionBackendUrl,
   collectionLinksetUrl,
@@ -53,7 +52,7 @@ import {
   spaceUrlById
 } from '@interop/pws-client/paths'
 import type { ISigner } from '@interop/data-integrity-core'
-import { capabilityActionFor } from '../helpers.js'
+import { signedRequest } from '../helpers.js'
 import assert from '../harness/assert.js'
 import type { Suite, TestCase } from '../harness/types.js'
 
@@ -61,51 +60,6 @@ interface State {
   alice: any
   collectionId: string
   resourceId: string
-}
-
-/**
- * Signs a raw capability invocation for an arbitrary method and sends it via
- * `fetch`, returning the response untouched.
- *
- * @param options {object}
- * @param options.url {string}   the target URL
- * @param options.method {string}   the HTTP method to send
- * @param options.invocationSigner {ISigner}   the caller's signer
- * @param [options.json] {object}   an optional JSON body
- * @returns {Promise<Response>}
- */
-async function signedRequest({
-  url,
-  method,
-  invocationSigner,
-  json
-}: {
-  url: string
-  method: string
-  invocationSigner: ISigner
-  json?: object
-}): Promise<Response> {
-  const body =
-    json === undefined
-      ? undefined
-      : new TextEncoder().encode(JSON.stringify(json))
-  const signatureHeaders = await signCapabilityInvocation({
-    url,
-    method,
-    headers: {
-      date: new Date().toUTCString(),
-      ...(body !== undefined && { 'content-type': 'application/json' })
-    },
-    ...(body !== undefined && { body }),
-    invocationSigner,
-    // A HEAD names the `GET` action. Every other method names itself.
-    capabilityAction: capabilityActionFor(method)
-  })
-  return fetch(url, {
-    method,
-    headers: signatureHeaders as Record<string, string>,
-    ...(body !== undefined && { body: new Blob([body]) })
-  })
 }
 
 /**
